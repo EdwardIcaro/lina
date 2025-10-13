@@ -205,11 +205,19 @@ export const deletePagamento = async (req: EmpresaRequest, res: Response) => {
       where: {
         id,
         empresaId: req.empresaId
+      },
+      include: {
+        ordem: true // Inclui os dados da ordem associada
       }
     });
 
     if (!pagamento) {
       return res.status(404).json({ error: 'Pagamento não encontrado' });
+    }
+
+    // Não permitir deletar pagamentos de ordens não finalizadas (exceto PENDENTE)
+    if (pagamento.ordem.status !== 'FINALIZADO' && pagamento.metodo !== 'PENDENTE') {
+      return res.status(400).json({ error: 'Não é possível excluir pagamentos de ordens que não estão finalizadas.' });
     }
 
     await prisma.pagamento.delete({

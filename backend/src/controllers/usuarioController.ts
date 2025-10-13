@@ -42,14 +42,15 @@ export const createUsuario = async (req: Request, res: Response) => {
  */
 export const authenticateUsuario = async (req: Request, res: Response) => {
   try {
-    const { nome, senha } = req.body;
+    const { nome: identifier, senha } = req.body;
 
-    if (!nome || !senha) {
+    if (!identifier || !senha) {
       return res.status(400).json({ error: 'Nome de usuário e senha são obrigatórios' });
     }
 
-    const usuario = await prisma.usuario.findUnique({
-      where: { nome },
+    // Procura o usuário tanto pelo nome quanto pelo e-mail
+    const usuario = await prisma.usuario.findFirst({
+      where: { OR: [{ nome: identifier }, { email: identifier }] },
     });
 
     if (!usuario) {

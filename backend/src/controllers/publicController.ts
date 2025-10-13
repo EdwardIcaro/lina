@@ -53,6 +53,12 @@ export const getOrdensByLavadorPublic = async (req: Request, res: Response) => {
             comissao: true,
           },
         },
+        items: { // Adicionado para incluir os itens da ordem
+          include: {
+            servico: { select: { nome: true } },
+            adicional: { select: { nome: true } }
+          }
+        },
       },
       orderBy: { createdAt: 'desc' },
     });

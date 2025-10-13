@@ -533,10 +533,11 @@ export const cancelOrdem = async (req: EmpresaRequest, res: Response) => {
  */
 export const getOrdensStats = async (req: EmpresaRequest, res: Response) => {
   try {
-    const { dataInicio, dataFim } = req.query;
+    const { dataInicio, dataFim, lavadorId, servicoId } = req.query;
 
     const where: any = {
-      empresaId: req.empresaId
+      empresaId: req.empresaId,
+      status: 'FINALIZADO' // Garante que todas as estatísticas sejam baseadas apenas em ordens finalizadas
     };
 
     if (dataInicio || dataFim) {
@@ -547,6 +548,19 @@ export const getOrdensStats = async (req: EmpresaRequest, res: Response) => {
       if (dataFim) {
         where.createdAt.lte = new Date(dataFim as string);
       }
+    }
+
+    if (lavadorId) {
+      where.lavadorId = lavadorId as string;
+    }
+
+    if (servicoId) {
+      where.items = {
+        some: {
+          servicoId: servicoId as string,
+          tipo: 'SERVICO'
+        }
+      };
     }
 
     // Primeiro, obter os IDs das ordens que atendem aos critérios
@@ -578,10 +592,7 @@ export const getOrdensStats = async (req: EmpresaRequest, res: Response) => {
         }
       }),
       prisma.ordemServico.count({
-        where: {
-          ...where,
-          status: 'FINALIZADO'
-        }
+        where: where // O status já está no 'where' principal
       }),
       
       // Corrigido: usar ordemId em vez de relação aninhada
