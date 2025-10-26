@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 interface EmpresaRequest extends Request {
     empresaId?: string;
-    empresa?: any;
 }
 /**
  * Criar novo pagamento
@@ -23,5 +22,6 @@ export declare const deletePagamento: (req: EmpresaRequest, res: Response) => Pr
  * Obter estatísticas de pagamento
  */
 export declare const getPaymentStats: (req: EmpresaRequest, res: Response) => Promise<void>;
+export declare const quitarPendencia: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export {};
 //# sourceMappingURL=pagamentoController.d.ts.map

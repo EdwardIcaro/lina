@@ -1,8 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '../generated/prisma';
-import bcrypt from 'bcrypt';
-
-const prisma = new PrismaClient();
+import prisma from '../db';
 
 interface EmpresaRequest extends Request {
   usuarioId?: string;
@@ -34,7 +31,7 @@ export const createEmpresa = async (req: EmpresaRequest, res: Response) => {
       return res.status(400).json({ error: 'Empresa com este nome já existe para este usuário' });
     }
 
-    // Criar empresa
+    // Criar empresa com valores padrão para notificationPreferences
     const empresa = await prisma.empresa.create({
       data: {
         nome,
@@ -42,6 +39,12 @@ export const createEmpresa = async (req: EmpresaRequest, res: Response) => {
         config: {
           moeda: 'BRL',
           timezone: 'America/Sao_Paulo'
+        },
+        notificationPreferences: {
+            ordemCriada: true,
+            ordemEditada: true,
+            ordemDeletada: false,
+            finalizacaoAutomatica: true
         }
       },
       select: {
@@ -49,6 +52,7 @@ export const createEmpresa = async (req: EmpresaRequest, res: Response) => {
         nome: true,
         ativo: true,
         config: true,
+        notificationPreferences: true, // Retornar o campo
         createdAt: true,
         updatedAt: true
       }
@@ -57,19 +61,16 @@ export const createEmpresa = async (req: EmpresaRequest, res: Response) => {
     // ** CRIAÇÃO AUTOMÁTICA DOS TIPOS DE VEÍCULO PADRÃO PARA A NOVA EMPRESA **
     const tiposVeiculoData = [
       // Tipos Principais (categoria null)
-      { nome: 'Carro', categoria: null, descricao: 'Veículos de passeio em geral', empresaId: empresa.id },
-      { nome: 'Moto', categoria: null, descricao: 'Motocicletas de todos os tipos', empresaId: empresa.id },
-      { nome: 'Outros', categoria: null, descricao: 'Serviços avulsos e personalizados', empresaId: empresa.id },
+      { nome: 'CARRO', categoria: null, descricao: 'Veículos de passeio em geral', empresaId: empresa.id },
+      { nome: 'MOTO', categoria: null, descricao: 'Motocicletas de todos os tipos', empresaId: empresa.id },
+      { nome: 'OUTROS', categoria: null, descricao: 'Serviços avulsos e personalizados', empresaId: empresa.id },
       // Subtipos de Carro
-      { nome: 'Hatch', categoria: 'Carro', descricao: 'Carros com traseira curta', empresaId: empresa.id },
-      { nome: 'Sedan', categoria: 'Carro', descricao: 'Carros com porta-malas saliente', empresaId: empresa.id },
-      { nome: 'SUV', categoria: 'Carro', descricao: 'Utilitários esportivos', empresaId: empresa.id },
-      { nome: 'Picapé', categoria: 'Carro', descricao: 'Picapes e utilitários com caçamba', empresaId: empresa.id },
-      { nome: 'Caminhonete', categoria: 'Carro', descricao: 'Veículos maiores com caçamba', empresaId: empresa.id },
+      { nome: 'CARRO', categoria: 'HATCH', descricao: 'Carros com traseira curta', empresaId: empresa.id },
+      { nome: 'CARRO', categoria: 'SEDAN', descricao: 'Carros com porta-malas saliente', empresaId: empresa.id },
+      { nome: 'CARRO', categoria: 'SUV', descricao: 'Utilitários esportivos', empresaId: empresa.id },
+      { nome: 'CARRO', categoria: 'PICKUP', descricao: 'Picapes e utilitários com caçamba', empresaId: empresa.id },
     ];
 
-    // Usamos `createMany` para inserir todos os tipos de uma vez de forma eficiente.
-    // Como é uma empresa nova, não precisamos nos preocupar com duplicatas.
     await prisma.tipoVeiculo.createMany({
       data: tiposVeiculoData,
     });
@@ -85,7 +86,7 @@ export const createEmpresa = async (req: EmpresaRequest, res: Response) => {
 };
 
 /**
- * Listar todas as empresas (apenas para admin)
+ * Listar todas as empresas do usuário logado
  */
 export const getEmpresas = async (req: EmpresaRequest, res: Response) => {
   try {
@@ -135,6 +136,12 @@ export const getEmpresaById = async (req: EmpresaRequest, res: Response) => {
         nome: true,
         ativo: true,
         config: true,
+        horarioAbertura: true,
+        horarioFechamento: true,
+        finalizacaoAutomatica: true,
+        exigirLavadorParaFinalizar: true,
+        paginaInicialPadrao: true,
+        notificationPreferences: true, // Retornar o campo
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -165,9 +172,12 @@ export const getEmpresaById = async (req: EmpresaRequest, res: Response) => {
 export const updateEmpresa = async (req: EmpresaRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { nome, config } = req.body;
+    const { 
+      nome, config, horarioAbertura, horarioFechamento, 
+      finalizacaoAutomatica, exigirLavadorParaFinalizar, paginaInicialPadrao, 
+      notificationPreferences // Adicionado
+    } = req.body;
 
-    // Verificar se empresa existe
     const existingEmpresa = await prisma.empresa.findUnique({
       where: { id }
     });
@@ -176,11 +186,16 @@ export const updateEmpresa = async (req: EmpresaRequest, res: Response) => {
       return res.status(404).json({ error: 'Empresa não encontrada' });
     }
 
-    // Preparar dados para atualização
     const updateData: any = {};
     
     if (nome) updateData.nome = nome;
     if (config) updateData.config = config;
+    if (horarioAbertura) updateData.horarioAbertura = horarioAbertura;
+    if (horarioFechamento) updateData.horarioFechamento = horarioFechamento;
+    if (finalizacaoAutomatica !== undefined) updateData.finalizacaoAutomatica = finalizacaoAutomatica;
+    if (exigirLavadorParaFinalizar !== undefined) updateData.exigirLavadorParaFinalizar = exigirLavadorParaFinalizar;
+    if (paginaInicialPadrao) updateData.paginaInicialPadrao = paginaInicialPadrao;
+    if (notificationPreferences) updateData.notificationPreferences = notificationPreferences; // Adicionado
 
     const empresa = await prisma.empresa.update({
       where: { id },
@@ -190,6 +205,12 @@ export const updateEmpresa = async (req: EmpresaRequest, res: Response) => {
         nome: true,
         ativo: true,
         config: true,
+        horarioAbertura: true,
+        horarioFechamento: true,
+        finalizacaoAutomatica: true,
+        exigirLavadorParaFinalizar: true,
+        paginaInicialPadrao: true,
+        notificationPreferences: true, // Retornar o campo
         updatedAt: true
       }
     });
@@ -211,12 +232,16 @@ export const toggleEmpresaStatus = async (req: EmpresaRequest, res: Response) =>
   try {
     const { id } = req.params;
 
+    // Encontra o estado atual antes de inverter
+    const currentEmpresa = await prisma.empresa.findUnique({ where: { id } });
+    if (!currentEmpresa) {
+      return res.status(404).json({ error: 'Empresa não encontrada' });
+    }
+
     const empresa = await prisma.empresa.update({
       where: { id },
       data: {
-        ativo: {
-          set: !(await prisma.empresa.findUnique({ where: { id } }))?.ativo
-        }
+        ativo: !currentEmpresa.ativo
       },
       select: {
         id: true,

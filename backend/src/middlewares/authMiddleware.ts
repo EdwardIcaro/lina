@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 
 interface AuthenticatedRequest extends Request {
   usuarioId?: string;
@@ -6,24 +7,31 @@ interface AuthenticatedRequest extends Request {
 }
 
 const authMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  // O ID do usuário logado é enviado no header 'x-usuario-id'
-  const usuarioId = req.headers['x-usuario-id'] as string;
+  const authHeader = req.headers.authorization;
   // O ID da empresa selecionada é enviado no header 'x-empresa-id'
   const empresaId = req.headers['x-empresa-id'] as string;
 
-  if (!usuarioId) {
-    return res.status(401).json({ error: 'Acesso não autorizado: ID do usuário ausente.' });
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token de autenticação não fornecido ou malformado' });
   }
 
-  // Anexa os IDs à requisição para que possam ser usados nos controllers
-  req.usuarioId = usuarioId;
+  if (!empresaId) {
+    return res.status(401).json({ error: 'ID da empresa não fornecido no cabeçalho' });
+  }
 
-  // O empresaId é opcional para algumas rotas (como criar a primeira empresa)
-  if (empresaId) {
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'seu_segredo_jwt_aqui');
+    
+    // Anexa os IDs à requisição para que possam ser usados nos controllers
+    req.usuarioId = decoded.id;
     req.empresaId = empresaId;
-  }
 
-  next();
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Token inválido ou expirado' });
+  }
 };
 
 export default authMiddleware;

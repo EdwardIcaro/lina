@@ -16,6 +16,10 @@ export declare const getVeiculos: (req: EmpresaRequest, res: Response) => Promis
  */
 export declare const getVeiculoById: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 /**
+ * Buscar veículo por Placa
+ */
+export declare const getVeiculoByPlaca: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+/**
  * Atualizar veículo
  */
 export declare const updateVeiculo: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;

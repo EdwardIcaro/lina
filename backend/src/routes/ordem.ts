@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import authMiddleware from '../middlewares/authMiddleware';
 import {
   createOrdem,
   getOrdens,
@@ -12,12 +13,12 @@ import {
 const router: Router = Router();
 
 // Rotas de ordens de serviço (todas requerem middleware de multi-empresa)
-router.post('/', createOrdem);
-router.get('/', getOrdens);
-router.get('/stats', getOrdensStats);
-router.get('/:id', getOrdemById);
-router.put('/:id', updateOrdem);
-router.patch('/:id/cancel', cancelOrdem);
-router.delete('/:id', deleteOrdem);
+router.post('/', authMiddleware, createOrdem);
+router.get('/', authMiddleware, getOrdens);
+router.get('/stats', authMiddleware, getOrdensStats);
+router.get('/:id', authMiddleware, getOrdemById);
+router.put('/:id', authMiddleware, updateOrdem);
+router.patch('/:id/cancel', authMiddleware, cancelOrdem);
+router.delete('/:id', authMiddleware, deleteOrdem);
 
 export default router;

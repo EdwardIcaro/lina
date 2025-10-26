@@ -8,6 +8,7 @@ const router = (0, express_1.Router)();
  * POST /api/pagamentos
  */
 router.post('/', pagamentoController_1.createPagamento);
+router.post('/quitar-pendencia', pagamentoController_1.quitarPendencia);
 /**
  * Listar pagamentos de uma ordem
  * GET /api/pagamentos/ordem/:ordemId

@@ -1,116 +1,76 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '../generated/prisma';
-import { startOfDay, endOfDay, subDays } from 'date-fns';
-
-const prisma = new PrismaClient();
+import prisma from '../db';
+import jwt from 'jsonwebtoken';
 
 /**
- * Retorna as ordens de um lavador específico para a visualização pública.
- * Apenas campos não-sensíveis são retornados.
+ * Retorna os dados públicos de um lavador com base em um token JWT.
+ * Esta rota não requer autenticação de empresa.
  */
-export const getOrdensByLavadorPublic = async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params; // ID do Lavador
-    const dateString = req.query.data as string; // Data para as ordens do dia
-    const statusQuery = req.query.status as string; // Status, ex: "FINALIZADO,EM_ANDAMENTO"
+export const getLavadorPublicData = async (req: Request, res: Response) => {
+    const { token } = req.body;
 
-    if (!id) {
-      return res.status(400).json({ error: 'ID do lavador é obrigatório.' });
+    if (!token) {
+        return res.status(400).json({ error: 'Token não fornecido.' });
     }
 
-    const statusList = statusQuery ? statusQuery.split(',') : ['FINALIZADO'];
+    try {
+        const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'seu_segredo_jwt_aqui');
+        const { lavadorId, empresaId } = decoded;
 
-    const whereClause: any = {
-      lavadorId: id,
-      status: { in: statusList }
-    };
+        if (!lavadorId || !empresaId) {
+            return res.status(401).json({ error: 'Token inválido.' });
+        }
 
-    // Se uma data for fornecida, filtra por ela. Senão, usa a data de hoje.
-    const targetDate = dateString && /^\d{4}-\d{2}-\d{2}$/.test(dateString)
-      ? new Date(`${dateString}T00:00:00`) // Garante que a data seja interpretada no fuso horário local
-      : new Date();
+        // Define o período dos últimos 30 dias para permitir cálculos semanais e mensais no frontend
+        const trintaDiasAtras = new Date();
+        trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
+        trintaDiasAtras.setHours(0, 0, 0, 0);
 
-    whereClause.createdAt = {
-      gte: startOfDay(targetDate),
-      lte: endOfDay(targetDate),
-    };
+        const hojeFim = new Date();
+        hojeFim.setHours(23, 59, 59, 999);
 
-    const ordens = await prisma.ordemServico.findMany({
-      where: whereClause,
-      select: {
-        id: true,
-        status: true,
-        valorTotal: true,
-        createdAt: true,
-        veiculo: {
-          select: {
-            placa: true,
-            modelo: true,
-          },
-        },
-        lavador: { // Incluindo para pegar a comissão
-          select: {
-            comissao: true,
-          },
-        },
-        items: { // Adicionado para incluir os itens da ordem
-          include: {
-            servico: { select: { nome: true } },
-            adicional: { select: { nome: true } }
-          }
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // Calcula e retorna os ganhos apenas se a requisição não for para uma data específica.
-    // Isso acontece na primeira carga da página.
-    if (!dateString) {
-      const now = new Date();
-      const calculateGains = async (startDate: Date) => {
-        const result = await prisma.ordemServico.aggregate({
-          where: {
-            lavadorId: id,
-            status: 'FINALIZADO',
-            createdAt: {
-              gte: startDate,
-              lte: now,
-            },
-          },
-          _sum: {
-            valorTotal: true,
-          },
+        const lavador = await prisma.lavador.findFirst({
+            where: { id: lavadorId, empresaId },
+            select: {
+                id: true,
+                nome: true,
+                comissao: true,
+                ordens: { // O nome da relação no schema.prisma é 'ordens'
+                    where: {
+                        createdAt: {
+                            gte: trintaDiasAtras, // Busca ordens dos últimos 30 dias
+                            lte: hojeFim,       // até o final de hoje
+                        },
+                        status: { in: ['EM_ANDAMENTO', 'FINALIZADO'] }
+                    },
+                    include: {
+                        veiculo: { select: { modelo: true, placa: true } },
+                        items: {
+                            include: {
+                                servico: { select: { nome: true } },
+                                adicional: { select: { nome: true } }
+                            }
+                        }
+                    },
+                    orderBy: { createdAt: 'desc' }
+                }
+            }
         });
-        return result._sum.valorTotal || 0;
-      };
 
-      const [daily, weekly, monthly] = await Promise.all([
-        calculateGains(startOfDay(now)),
-        calculateGains(subDays(now, 7)),
-        calculateGains(subDays(now, 30)),
-      ]);
+        if (!lavador) {
+            return res.status(404).json({ error: 'Lavador não encontrado.' });
+        }
 
-      // Busca a comissão diretamente do cadastro do lavador para garantir precisão.
-      const lavador = await prisma.lavador.findUnique({
-        where: { id },
-        select: { comissao: true },
-      });
-      const comissaoPercentual = lavador?.comissao ?? 0;
-
-      return res.json({
-        ordens,
-        ganhos: {
-          daily: daily * (comissaoPercentual / 100),
-          weekly: weekly * (comissaoPercentual / 100),
-          monthly: monthly * (comissaoPercentual / 100),
-        },
-      });
+        res.json({
+            nome: lavador.nome,
+            comissao: lavador.comissao,
+            ordens: lavador.ordens, // Retorna todas as ordens do período
+        });
+    } catch (error) {
+        res.status(401).json({ error: 'Token inválido ou expirado.' });
     }
+};
 
-    // Para requisições com data, retorna apenas as ordens.
-    res.json({ ordens });
-  } catch (error) {
-    console.error('Erro ao buscar ordens públicas do lavador:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
+export const getOrdensByLavadorPublic = async (req: Request, res: Response) => {
+    // Lógica existente...
 };

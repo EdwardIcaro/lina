@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '../generated/prisma';
+import prisma from '../db';
 
-const prisma = new PrismaClient();
+// const prisma = new PrismaClient(); // Removido para usar a instância global
 
 // Interface para estender o Request com empresaId
 interface EmpresaRequest extends Request {

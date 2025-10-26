@@ -3,58 +3,69 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.authenticateEmpresa = exports.toggleEmpresaStatus = exports.updateEmpresa = exports.getEmpresaById = exports.getEmpresas = exports.createEmpresa = void 0;
-const prisma_1 = require("../generated/prisma");
-const bcrypt_1 = __importDefault(require("bcrypt"));
-const prisma = new prisma_1.PrismaClient();
+exports.toggleEmpresaStatus = exports.updateEmpresa = exports.getEmpresaById = exports.getEmpresas = exports.createEmpresa = void 0;
+const db_1 = __importDefault(require("../db"));
 /**
  * Criar nova empresa
  */
 const createEmpresa = async (req, res) => {
     try {
-        const { nome, cnpj, senhaChave } = req.body;
+        const { nome } = req.body;
+        const usuarioId = req.usuarioId; // O ID do usuário virá do middleware
         // Validações básicas
-        if (!nome || !senhaChave) {
-            return res.status(400).json({
-                error: 'Nome e senha chave são obrigatórios'
-            });
+        if (!nome) {
+            return res.status(400).json({ error: 'Nome da empresa é obrigatório' });
+        }
+        if (!usuarioId) {
+            return res.status(401).json({ error: 'Usuário não autenticado' });
         }
         // Verificar se empresa já existe
-        const existingEmpresa = await prisma.empresa.findFirst({
-            where: {
-                OR: [
-                    { nome: { equals: nome } },
-                    ...(cnpj ? [{ cnpj }] : [])
-                ]
-            }
+        const existingEmpresa = await db_1.default.empresa.findFirst({
+            where: { nome, usuarioId },
         });
         if (existingEmpresa) {
-            return res.status(400).json({
-                error: 'Empresa com este nome ou CNPJ já existe'
-            });
+            return res.status(400).json({ error: 'Empresa com este nome já existe para este usuário' });
         }
-        // Hash da senha chave
-        const hashedSenhaChave = await bcrypt_1.default.hash(senhaChave, 12);
-        // Criar empresa
-        const empresa = await prisma.empresa.create({
+        // Criar empresa com valores padrão para notificationPreferences
+        const empresa = await db_1.default.empresa.create({
             data: {
                 nome,
-                cnpj,
-                senhaChave: hashedSenhaChave,
+                usuarioId,
                 config: {
                     moeda: 'BRL',
                     timezone: 'America/Sao_Paulo'
+                },
+                notificationPreferences: {
+                    ordemCriada: true,
+                    ordemEditada: true,
+                    ordemDeletada: false,
+                    finalizacaoAutomatica: true
                 }
             },
             select: {
                 id: true,
                 nome: true,
-                cnpj: true,
                 ativo: true,
                 config: true,
+                notificationPreferences: true, // Retornar o campo
                 createdAt: true,
                 updatedAt: true
             }
+        });
+        // ** CRIAÇÃO AUTOMÁTICA DOS TIPOS DE VEÍCULO PADRÃO PARA A NOVA EMPRESA **
+        const tiposVeiculoData = [
+            // Tipos Principais (categoria null)
+            { nome: 'CARRO', categoria: null, descricao: 'Veículos de passeio em geral', empresaId: empresa.id },
+            { nome: 'MOTO', categoria: null, descricao: 'Motocicletas de todos os tipos', empresaId: empresa.id },
+            { nome: 'OUTROS', categoria: null, descricao: 'Serviços avulsos e personalizados', empresaId: empresa.id },
+            // Subtipos de Carro
+            { nome: 'CARRO', categoria: 'HATCH', descricao: 'Carros com traseira curta', empresaId: empresa.id },
+            { nome: 'CARRO', categoria: 'SEDAN', descricao: 'Carros com porta-malas saliente', empresaId: empresa.id },
+            { nome: 'CARRO', categoria: 'SUV', descricao: 'Utilitários esportivos', empresaId: empresa.id },
+            { nome: 'CARRO', categoria: 'PICKUP', descricao: 'Picapes e utilitários com caçamba', empresaId: empresa.id },
+        ];
+        await db_1.default.tipoVeiculo.createMany({
+            data: tiposVeiculoData,
         });
         res.status(201).json({
             message: 'Empresa criada com sucesso',
@@ -68,18 +79,21 @@ const createEmpresa = async (req, res) => {
 };
 exports.createEmpresa = createEmpresa;
 /**
- * Listar todas as empresas (apenas para admin)
+ * Listar todas as empresas do usuário logado
  */
 const getEmpresas = async (req, res) => {
     try {
-        const empresas = await prisma.empresa.findMany({
+        const usuarioId = req.usuarioId;
+        if (!usuarioId) {
+            return res.status(401).json({ error: 'Usuário não autenticado' });
+        }
+        const empresas = await db_1.default.empresa.findMany({
+            where: { usuarioId },
             select: {
                 id: true,
                 nome: true,
-                cnpj: true,
                 ativo: true,
                 createdAt: true,
-                updatedAt: true,
                 _count: {
                     select: {
                         clientes: true,
@@ -106,14 +120,19 @@ exports.getEmpresas = getEmpresas;
 const getEmpresaById = async (req, res) => {
     try {
         const { id } = req.params;
-        const empresa = await prisma.empresa.findUnique({
+        const empresa = await db_1.default.empresa.findUnique({
             where: { id },
             select: {
                 id: true,
                 nome: true,
-                cnpj: true,
                 ativo: true,
                 config: true,
+                horarioAbertura: true,
+                horarioFechamento: true,
+                finalizacaoAutomatica: true,
+                exigirLavadorParaFinalizar: true,
+                paginaInicialPadrao: true,
+                notificationPreferences: true, // Retornar o campo
                 createdAt: true,
                 updatedAt: true,
                 _count: {
@@ -143,35 +162,45 @@ exports.getEmpresaById = getEmpresaById;
 const updateEmpresa = async (req, res) => {
     try {
         const { id } = req.params;
-        const { nome, cnpj, senhaChave, config } = req.body;
-        // Verificar se empresa existe
-        const existingEmpresa = await prisma.empresa.findUnique({
+        const { nome, config, horarioAbertura, horarioFechamento, finalizacaoAutomatica, exigirLavadorParaFinalizar, paginaInicialPadrao, notificationPreferences // Adicionado
+         } = req.body;
+        const existingEmpresa = await db_1.default.empresa.findUnique({
             where: { id }
         });
         if (!existingEmpresa) {
             return res.status(404).json({ error: 'Empresa não encontrada' });
         }
-        // Preparar dados para atualização
         const updateData = {};
         if (nome)
             updateData.nome = nome;
-        if (cnpj !== undefined)
-            updateData.cnpj = cnpj;
         if (config)
             updateData.config = config;
-        // Se senha chave for fornecida, fazer hash
-        if (senhaChave) {
-            updateData.senhaChave = await bcrypt_1.default.hash(senhaChave, 12);
-        }
-        const empresa = await prisma.empresa.update({
+        if (horarioAbertura)
+            updateData.horarioAbertura = horarioAbertura;
+        if (horarioFechamento)
+            updateData.horarioFechamento = horarioFechamento;
+        if (finalizacaoAutomatica !== undefined)
+            updateData.finalizacaoAutomatica = finalizacaoAutomatica;
+        if (exigirLavadorParaFinalizar !== undefined)
+            updateData.exigirLavadorParaFinalizar = exigirLavadorParaFinalizar;
+        if (paginaInicialPadrao)
+            updateData.paginaInicialPadrao = paginaInicialPadrao;
+        if (notificationPreferences)
+            updateData.notificationPreferences = notificationPreferences; // Adicionado
+        const empresa = await db_1.default.empresa.update({
             where: { id },
             data: updateData,
             select: {
                 id: true,
                 nome: true,
-                cnpj: true,
                 ativo: true,
                 config: true,
+                horarioAbertura: true,
+                horarioFechamento: true,
+                finalizacaoAutomatica: true,
+                exigirLavadorParaFinalizar: true,
+                paginaInicialPadrao: true,
+                notificationPreferences: true, // Retornar o campo
                 updatedAt: true
             }
         });
@@ -192,12 +221,15 @@ exports.updateEmpresa = updateEmpresa;
 const toggleEmpresaStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const empresa = await prisma.empresa.update({
+        // Encontra o estado atual antes de inverter
+        const currentEmpresa = await db_1.default.empresa.findUnique({ where: { id } });
+        if (!currentEmpresa) {
+            return res.status(404).json({ error: 'Empresa não encontrada' });
+        }
+        const empresa = await db_1.default.empresa.update({
             where: { id },
             data: {
-                ativo: {
-                    set: !(await prisma.empresa.findUnique({ where: { id } }))?.ativo
-                }
+                ativo: !currentEmpresa.ativo
             },
             select: {
                 id: true,
@@ -217,47 +249,4 @@ const toggleEmpresaStatus = async (req, res) => {
     }
 };
 exports.toggleEmpresaStatus = toggleEmpresaStatus;
-/**
- * Autenticar empresa (login)
- */
-const authenticateEmpresa = async (req, res) => {
-    try {
-        const { nome, senhaChave } = req.body;
-        if (!nome || !senhaChave) {
-            return res.status(400).json({
-                error: 'Nome e senha chave são obrigatórios'
-            });
-        }
-        // Buscar empresa pelo nome
-        const empresa = await prisma.empresa.findFirst({
-            where: {
-                nome: { equals: nome },
-                ativo: true
-            }
-        });
-        if (!empresa) {
-            return res.status(404).json({
-                error: 'Empresa não encontrada ou inativa'
-            });
-        }
-        // Verificar senha chave
-        const isSenhaValida = await bcrypt_1.default.compare(senhaChave, empresa.senhaChave);
-        if (!isSenhaValida) {
-            return res.status(401).json({
-                error: 'Senha chave inválida'
-            });
-        }
-        // Retornar dados da empresa (sem a senha)
-        const { senhaChave: _, ...empresaData } = empresa;
-        res.json({
-            message: 'Autenticação realizada com sucesso',
-            empresa: empresaData
-        });
-    }
-    catch (error) {
-        console.error('Erro na autenticação:', error);
-        res.status(500).json({ error: 'Erro interno do servidor' });
-    }
-};
-exports.authenticateEmpresa = authenticateEmpresa;
 //# sourceMappingURL=empresaController.js.map

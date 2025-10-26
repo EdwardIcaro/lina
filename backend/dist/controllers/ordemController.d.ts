@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
 interface EmpresaRequest extends Request {
     empresaId?: string;
-    empresa?: any;
 }
 /**
  * Criar nova ordem de serviço
+ * Agora, esta função também pode criar um cliente e/ou veículo se eles não existirem.
  */
-export declare const createOrdem: (req: EmpresaRequest, res: Response) => Promise<void | Response<any, Record<string, any>> | undefined>;
+export declare const createOrdem: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 /**
  * Listar ordens de serviço da empresa
  */
@@ -18,7 +18,7 @@ export declare const getOrdemById: (req: EmpresaRequest, res: Response) => Promi
 /**
  * Atualizar ordem de serviço
  */
-export declare const updateOrdem: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+export declare const updateOrdem: (req: EmpresaRequest, res: Response) => Promise<void>;
 /**
  * Cancelar ordem de serviço
  */
@@ -31,5 +31,10 @@ export declare const getOrdensStats: (req: EmpresaRequest, res: Response) => Pro
  * Deletar ordem de serviço permanentemente
  */
 export declare const deleteOrdem: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+/**
+ * Itera sobre as empresas para finalizar ordens do dia conforme o horário de fechamento.
+ * Esta função é chamada pelo cron job a cada 15 minutos.
+ */
+export declare const processarFinalizacoesAutomaticas: () => Promise<void>;
 export {};
 //# sourceMappingURL=ordemController.d.ts.map

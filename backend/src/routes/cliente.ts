@@ -13,9 +13,9 @@ const router: Router = Router();
 // Rotas de clientes (todas requerem middleware de multi-empresa)
 router.post('/', createCliente);
 router.get('/', getClientes);
-router.get('/:id', getClienteById);
 router.put('/:id', updateCliente);
 router.delete('/:id', deleteCliente);
-router.get('/placa/:placa', getClienteByPlaca);
+router.get('/veiculo/placa/:placa', getClienteByPlaca); // Rota corrigida
+router.get('/:id', getClienteById);
 
 export default router;

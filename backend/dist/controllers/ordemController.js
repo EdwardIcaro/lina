@@ -1,194 +1,211 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteOrdem = exports.getOrdensStats = exports.cancelOrdem = exports.updateOrdem = exports.getOrdemById = exports.getOrdens = exports.createOrdem = void 0;
-const prisma_1 = require("../generated/prisma");
-const prisma = new prisma_1.PrismaClient();
+exports.processarFinalizacoesAutomaticas = exports.deleteOrdem = exports.getOrdensStats = exports.cancelOrdem = exports.updateOrdem = exports.getOrdemById = exports.getOrdens = exports.createOrdem = void 0;
+const client_1 = require("@prisma/client");
+const db_1 = __importDefault(require("../db"));
+const notificationService_1 = require("../services/notificationService");
 /**
  * Criar nova ordem de serviço
+ * Agora, esta função também pode criar um cliente e/ou veículo se eles não existirem.
  */
 const createOrdem = async (req, res) => {
-    return await prisma.$transaction(async (tx) => {
-        const { clienteId, veiculoId, lavadorId, itens, observacoes } = req.body;
-        if (!clienteId || !veiculoId || !itens || !Array.isArray(itens) || itens.length === 0) {
-            return res.status(400).json({
-                error: 'Cliente ID, veículo ID e itens são obrigatórios'
-            });
-        }
-        // Verificar se cliente existe e pertence à empresa
-        const cliente = await tx.cliente.findFirst({
-            where: {
-                id: clienteId,
-                empresaId: req.empresaId
-            }
-        });
-        if (!cliente) {
-            return res.status(404).json({ error: 'Cliente não encontrado' });
-        }
-        // Verificar se veículo existe e pertence ao cliente
-        const veiculo = await tx.veiculo.findFirst({
-            where: {
-                id: veiculoId,
-                clienteId
-            }
-        });
-        if (!veiculo) {
-            return res.status(404).json({ error: 'Veículo não encontrado ou não pertence ao cliente' });
-        }
-        if (!veiculo.categoriaId) {
-            return res.status(400).json({ error: 'O veículo precisa ter uma categoria definida para criar uma ordem.' });
-        }
-        // Verificar se lavador existe e pertence à empresa (se fornecido)
-        if (lavadorId) {
-            const lavador = await tx.lavador.findFirst({
-                where: {
-                    id: lavadorId,
-                    empresaId: req.empresaId,
-                    ativo: true
-                }
-            });
-            if (!lavador) {
-                return res.status(404).json({ error: 'Lavador não encontrado ou inativo' });
-            }
-        }
-        // Validar itens e calcular valores
-        let valorTotal = 0;
-        const itensData = [];
-        for (const item of itens) {
-            const { tipo, itemId, quantidade } = item;
-            if (!tipo || !itemId || quantidade <= 0) {
-                return res.status(400).json({
-                    error: 'Cada item deve ter tipo, ID e quantidade válida'
-                });
-            }
-            let itemData;
-            let precoUnitario = 0;
-            if (tipo === prisma_1.OrdemItemType.SERVICO) {
-                const servicoComPreco = await tx.servico.findUnique({
+    const empresaId = req.empresaId;
+    if (!empresaId) {
+        return res.status(401).json({ error: 'Empresa não autenticada' });
+    }
+    const { clienteId, novoCliente, veiculoId, novoVeiculo, lavadorId, itens, forcarCriacao, observacoes } = req.body;
+    // Validações
+    if ((!clienteId && !novoCliente) || (!veiculoId && !novoVeiculo) || !itens || !Array.isArray(itens) || itens.length === 0) {
+        return res.status(400).json({ error: 'Dados incompletos para criar a ordem.' });
+    }
+    try {
+        // Utiliza uma transação para garantir a atomicidade da operação
+        const ordem = await db_1.default.$transaction(async (tx) => {
+            let finalClienteId = clienteId;
+            let finalVeiculoId = veiculoId;
+            // 1. Determina o ID do cliente: usa o existente ou cria um novo.
+            if (!finalClienteId && novoCliente && novoCliente.nome) {
+                // Primeiro, tenta encontrar um cliente existente com o mesmo nome e telefone
+                let clienteExistente = await tx.cliente.findFirst({
                     where: {
-                        id: itemId,
-                        empresaId: req.empresaId,
-                        ativo: true
+                        nome: novoCliente.nome,
+                        telefone: novoCliente.telefone || null,
+                        empresaId: empresaId,
                     },
-                    include: {
-                        precos: {
-                            where: { categoriaId: veiculo.categoriaId }
-                        }
-                    }
                 });
-                if (!servicoComPreco) {
-                    return res.status(404).json({ error: `Serviço com ID ${itemId} não encontrado` });
+                if (clienteExistente) {
+                    finalClienteId = clienteExistente.id;
                 }
-                if (!servicoComPreco.precos || servicoComPreco.precos.length === 0) {
-                    return res.status(400).json({ error: `Serviço '${servicoComPreco.nome}' não tem preço definido para a categoria deste veículo.` });
-                }
-                precoUnitario = servicoComPreco.precos[0].preco;
-                itemData = {
-                    tipo: prisma_1.OrdemItemType.SERVICO,
-                    servicoId: itemId,
-                    quantidade,
-                    precoUnit: precoUnitario,
-                    subtotal: precoUnitario * quantidade
-                };
-            }
-            else if (tipo === prisma_1.OrdemItemType.ADICIONAL) {
-                const adicionalComPreco = await tx.adicional.findUnique({
-                    where: {
-                        id: itemId,
-                        empresaId: req.empresaId,
-                        ativo: true
-                    },
-                    include: {
-                        precos: {
-                            where: { categoriaId: veiculo.categoriaId }
-                        }
-                    }
-                });
-                if (!adicionalComPreco) {
-                    return res.status(404).json({ error: `Serviço adicional com ID ${itemId} não encontrado` });
-                }
-                if (!adicionalComPreco.precos || adicionalComPreco.precos.length === 0) {
-                    return res.status(400).json({ error: `Serviço adicional '${adicionalComPreco.nome}' não tem preço definido para a categoria deste veículo.` });
-                }
-                precoUnitario = adicionalComPreco.precos[0].preco;
-                itemData = {
-                    tipo: prisma_1.OrdemItemType.ADICIONAL,
-                    adicionalId: itemId,
-                    quantidade,
-                    precoUnit: precoUnitario,
-                    subtotal: precoUnitario * quantidade
-                };
-            }
-            else {
-                return res.status(400).json({
-                    error: 'Tipo de item inválido. Use SERVICO ou ADICIONAL'
-                });
-            }
-            itensData.push(itemData);
-            valorTotal += itemData.subtotal;
-        }
-        // Criar ordem de serviço com itens
-        const ordem = await tx.ordemServico.create({
-            data: {
-                empresaId: req.empresaId,
-                clienteId,
-                veiculoId,
-                lavadorId,
-                status: lavadorId ? prisma_1.OrdemStatus.EM_ANDAMENTO : prisma_1.OrdemStatus.PENDENTE,
-                valorTotal,
-                observacoes,
-                items: {
-                    create: itensData
-                }
-            },
-            include: {
-                cliente: {
-                    select: {
-                        id: true,
-                        nome: true,
-                        telefone: true
-                    }
-                },
-                veiculo: {
-                    select: {
-                        id: true,
-                        placa: true,
-                        modelo: true,
-                        cor: true
-                    }
-                },
-                lavador: {
-                    select: {
-                        id: true,
-                        nome: true,
-                        comissao: true
-                    }
-                },
-                items: {
-                    include: {
-                        servico: {
-                            select: {
-                                id: true,
-                                nome: true
-                            }
+                else {
+                    // Se não encontrar, cria um novo cliente
+                    const clienteCriado = await tx.cliente.create({
+                        data: {
+                            nome: novoCliente.nome,
+                            telefone: novoCliente.telefone,
+                            empresaId,
                         },
-                        adicional: {
-                            select: {
-                                id: true,
-                                nome: true
-                            }
-                        }
-                    }
+                    });
+                    finalClienteId = clienteCriado.id;
                 }
             }
+            // 2. Cria o veículo se for novo
+            if (novoVeiculo && novoVeiculo.placa) {
+                // Primeiro, tenta encontrar um veículo com a mesma placa
+                let veiculoExistente = await tx.veiculo.findUnique({
+                    where: { placa: novoVeiculo.placa },
+                });
+                if (veiculoExistente) {
+                    finalVeiculoId = veiculoExistente.id;
+                }
+                else {
+                    // Se não encontrar, cria um novo veículo
+                    const veiculoCriado = await tx.veiculo.create({
+                        data: {
+                            placa: novoVeiculo.placa,
+                            modelo: novoVeiculo.modelo,
+                            cor: novoVeiculo.cor,
+                            clienteId: finalClienteId,
+                        },
+                        include: {
+                            // Inclui o cliente para garantir que os dados retornados estejam completos
+                            cliente: true
+                        }
+                    });
+                    finalVeiculoId = veiculoCriado.id;
+                }
+            }
+            // 3. Verifica se já existe uma ordem ativa para o veículo
+            if (!forcarCriacao) {
+                const ordemAtiva = await tx.ordemServico.findFirst({
+                    where: {
+                        veiculoId: finalVeiculoId,
+                        empresaId,
+                        status: { in: [client_1.OrdemStatus.PENDENTE, client_1.OrdemStatus.EM_ANDAMENTO] },
+                    },
+                });
+                if (ordemAtiva) {
+                    // Lança um erro para abortar a transação
+                    throw { code: 'ACTIVE_ORDER_EXISTS' };
+                }
+            }
+            // 4. Calcula o valor total e prepara os itens da ordem
+            let calculatedValorTotal = 0;
+            const ordemItemsData = await Promise.all(itens.map(async (item) => {
+                let precoUnit = 0;
+                let itemData;
+                if (item.tipo === 'SERVICO') {
+                    const servico = await tx.servico.findUnique({ where: { id: item.itemId } });
+                    if (servico) {
+                        precoUnit = servico.preco;
+                    }
+                    else {
+                        // Lançar um erro se o serviço não for encontrado pode ajudar a debugar
+                        throw new Error(`Serviço com ID ${item.itemId} não encontrado.`);
+                    }
+                    const subtotal = precoUnit * item.quantidade;
+                    calculatedValorTotal += subtotal;
+                    itemData = {
+                        tipo: 'SERVICO',
+                        quantidade: item.quantidade,
+                        precoUnit,
+                        subtotal,
+                        servicoId: item.itemId
+                    };
+                }
+                else if (item.tipo === 'ADICIONAL') {
+                    const adicional = await tx.adicional.findUnique({ where: { id: item.itemId } });
+                    if (adicional) {
+                        precoUnit = adicional.preco;
+                    }
+                    else {
+                        // Lançar um erro se o adicional não for encontrado
+                        throw new Error(`Adicional com ID ${item.itemId} não encontrado.`);
+                    }
+                    const subtotal = precoUnit * item.quantidade;
+                    calculatedValorTotal += subtotal;
+                    itemData = {
+                        tipo: 'ADICIONAL',
+                        quantidade: item.quantidade,
+                        precoUnit,
+                        subtotal,
+                        adicionalId: item.itemId
+                    };
+                }
+                else {
+                    // Se o tipo não for nem SERVICO nem ADICIONAL, lança um erro.
+                    throw new Error(`Tipo de item desconhecido: ${item.tipo}`);
+                }
+                return itemData;
+            }));
+            // Add a final validation check before creating the order
+            if (!finalClienteId || !finalVeiculoId) {
+                throw new Error("ID do cliente ou do veículo não pôde ser determinado.");
+            }
+            // 5. Calcular comissão
+            let comissaoCalculada = 0;
+            if (lavadorId) {
+                const lavador = await tx.lavador.findUnique({ where: { id: lavadorId } });
+                if (lavador && lavador.comissao > 0) {
+                    // A comissão é uma porcentagem do valor total da ordem
+                    comissaoCalculada = calculatedValorTotal * (lavador.comissao / 100);
+                }
+            }
+            // 6. Gerar o número da ordem
+            const ultimaOrdem = await tx.ordemServico.findFirst({
+                where: { empresaId },
+                orderBy: { numeroOrdem: 'desc' },
+                select: { numeroOrdem: true },
+            });
+            const proximoNumeroOrdem = (ultimaOrdem?.numeroOrdem || 0) + 1;
+            // 7. Cria a ordem de serviço
+            const novaOrdem = await tx.ordemServico.create({
+                data: {
+                    numeroOrdem: proximoNumeroOrdem,
+                    empresaId,
+                    clienteId: finalClienteId,
+                    veiculoId: finalVeiculoId,
+                    lavadorId,
+                    valorTotal: calculatedValorTotal,
+                    comissao: comissaoCalculada, // A comissão é calculada, mas só é "devida" ao finalizar
+                    status: lavadorId ? client_1.OrdemStatus.EM_ANDAMENTO : client_1.OrdemStatus.PENDENTE,
+                    observacoes: observacoes,
+                    items: { create: ordemItemsData.filter(Boolean) },
+                },
+                include: {
+                    cliente: true,
+                    veiculo: true,
+                    lavador: true,
+                    items: { include: { servico: true, adicional: true } },
+                },
+            });
+            return novaOrdem;
         });
-        res.status(201).json({
-            message: 'Ordem de serviço criada com sucesso',
-            ordem
+        // Enviar notificação APÓS a transação para garantir que os dados estão corretos
+        await (0, notificationService_1.createNotification)({
+            empresaId: empresaId,
+            mensagem: `Nova ordem #${ordem.numeroOrdem} (${ordem.cliente.nome}) foi criada.`,
+            link: `ordens.html?id=${ordem.id}`,
+            type: 'ordemCriada'
         });
-    }).catch(error => {
-        console.error('Erro ao criar ordem de serviço:', error);
-        res.status(500).json({ error: 'Erro interno do servidor' });
-    });
+        res.status(201).json({ message: 'Ordem de serviço criada com sucesso!', ordem });
+    }
+    catch (error) {
+        if (error.code === 'ACTIVE_ORDER_EXISTS') {
+            return res.status(409).json({
+                error: 'Já existe uma ordem de serviço ativa para este veículo.',
+                code: 'ACTIVE_ORDER_EXISTS',
+            });
+        }
+        console.error('Erro detalhado ao criar ordem de serviço:', error);
+        res.status(500).json({
+            error: 'Erro interno do servidor ao criar ordem.',
+            details: error.message || 'Nenhuma mensagem de erro específica.',
+            stack: error.stack
+        });
+    }
 };
 exports.createOrdem = createOrdem;
 /**
@@ -196,27 +213,38 @@ exports.createOrdem = createOrdem;
  */
 const getOrdens = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, status, clienteId, lavadorId, dataInicio, dataFim } = req.query;
-        const skip = (Number(page) - 1) * Number(limit);
+        const { page: pageQuery, limit: limitQuery, search, status, clienteId, lavadorId, dataInicio, dataFim, metodoPagamento, } = req.query;
+        const page = Number(pageQuery) || 1;
+        const limit = Number(limitQuery) || 10;
+        const skip = (page - 1) * limit;
         const where = {
-            empresaId: req.empresaId
+            empresaId: req.empresaId,
         };
         if (search) {
             where.OR = [
                 {
                     cliente: {
-                        nome: { contains: search }
+                        nome: { contains: search, mode: 'insensitive' }
                     }
                 },
                 {
                     veiculo: {
-                        placa: { contains: search }
+                        placa: { contains: search, mode: 'insensitive' }
                     }
                 }
             ];
         }
         if (status) {
-            where.status = status;
+            const statusString = status;
+            if (statusString === 'ACTIVE') {
+                where.status = { in: [client_1.OrdemStatus.PENDENTE, client_1.OrdemStatus.EM_ANDAMENTO] };
+            }
+            else if (statusString.includes(',')) {
+                where.status = { in: statusString.split(',') };
+            }
+            else {
+                where.status = statusString;
+            }
         }
         if (clienteId) {
             where.clienteId = clienteId;
@@ -224,17 +252,29 @@ const getOrdens = async (req, res) => {
         if (lavadorId) {
             where.lavadorId = lavadorId;
         }
-        if (dataInicio || dataFim) {
-            where.createdAt = {};
-            if (dataInicio) {
-                where.createdAt.gte = new Date(dataInicio);
-            }
-            if (dataFim) {
-                where.createdAt.lte = new Date(dataFim);
-            }
+        if (dataInicio && dataFim && dataInicio !== 'null' && dataFim !== 'null') {
+            const empresa = await db_1.default.empresa.findUnique({ where: { id: req.empresaId } });
+            const horarioAbertura = empresa?.horarioAbertura || '07:00';
+            const startDateString = dataInicio.split('T')[0];
+            const endDateString = dataFim.split('T')[0];
+            const start = new Date(`T:00`);
+            const end = new Date(`T:00`);
+            end.setDate(end.getDate() + 1);
+            end.setMilliseconds(end.getMilliseconds() - 1);
+            where.createdAt = {
+                gte: start,
+                lte: end,
+            };
+        }
+        if (metodoPagamento) {
+            where.pagamentos = {
+                some: {
+                    metodo: metodoPagamento
+                }
+            };
         }
         const [ordens, total] = await Promise.all([
-            prisma.ordemServico.findMany({
+            db_1.default.ordemServico.findMany({
                 where,
                 include: {
                     cliente: {
@@ -274,6 +314,11 @@ const getOrdens = async (req, res) => {
                                 }
                             }
                         }
+                    },
+                    pagamentos: {
+                        orderBy: {
+                            createdAt: 'asc'
+                        }
                     }
                 },
                 orderBy: {
@@ -282,7 +327,7 @@ const getOrdens = async (req, res) => {
                 skip,
                 take: Number(limit)
             }),
-            prisma.ordemServico.count({ where })
+            db_1.default.ordemServico.count({ where })
         ]);
         res.json({
             ordens,
@@ -306,7 +351,7 @@ exports.getOrdens = getOrdens;
 const getOrdemById = async (req, res) => {
     try {
         const { id } = req.params;
-        const ordem = await prisma.ordemServico.findFirst({
+        const ordem = await db_1.default.ordemServico.findFirst({
             where: {
                 id,
                 empresaId: req.empresaId
@@ -350,7 +395,9 @@ const getOrdemById = async (req, res) => {
                                 nome: true
                             }
                         }
-                    },
+                    }
+                },
+                pagamentos: {
                     orderBy: {
                         createdAt: 'asc'
                     }
@@ -373,100 +420,106 @@ exports.getOrdemById = getOrdemById;
  */
 const updateOrdem = async (req, res) => {
     try {
-        const { id } = req.params;
-        const { status, lavadorId, observacoes } = req.body;
-        // Verificar se ordem existe e pertence à empresa
-        const existingOrdem = await prisma.ordemServico.findFirst({
-            where: {
-                id,
-                empresaId: req.empresaId
-            }
-        });
-        if (!existingOrdem) {
-            return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
-        }
-        // Validar status se fornecido
-        const statusValidos = ['PENDENTE', 'EM_ANDAMENTO', 'FINALIZADO', 'CANCELADO'];
-        if (status && !statusValidos.includes(status)) {
-            return res.status(400).json({
-                error: `Status inválido. Use: ${statusValidos.join(', ')}`
+        const updatedOrdemResult = await db_1.default.$transaction(async (tx) => {
+            const { id } = req.params;
+            const { status, lavadorId, observacoes, itens } = req.body;
+            const existingOrdem = await tx.ordemServico.findFirst({
+                where: { id, empresaId: req.empresaId },
             });
-        }
-        // Verificar se lavador existe e pertence à empresa (se fornecido)
-        if (lavadorId) {
-            const lavador = await prisma.lavador.findFirst({
-                where: {
-                    id: lavadorId,
-                    empresaId: req.empresaId,
-                    ativo: true
+            if (!existingOrdem) {
+                throw new Error('Ordem de serviço não encontrada'); // Lança um erro para ser pego pelo catch
+            }
+            let valorTotal = existingOrdem.valorTotal;
+            const dataToUpdate = {
+                observacoes,
+                status,
+                lavador: lavadorId ? { connect: { id: lavadorId } } : undefined,
+            };
+            if (itens && Array.isArray(itens)) {
+                await tx.ordemServicoItem.deleteMany({ where: { ordemId: id } });
+                valorTotal = 0;
+                const itensData = [];
+                for (const item of itens) {
+                    const { tipo, itemId, quantidade } = item;
+                    if (!tipo || !itemId || !quantidade || quantidade <= 0) {
+                        throw new Error('Cada item deve ter tipo, ID e quantidade válida');
+                    }
+                    let itemData;
+                    let precoUnitario = 0;
+                    if (tipo === client_1.OrdemItemType.SERVICO) {
+                        const servico = await tx.servico.findUnique({ where: { id: itemId, empresaId: req.empresaId } });
+                        if (!servico)
+                            throw new Error(`Serviço com ID ${itemId} não encontrado`);
+                        precoUnitario = servico.preco;
+                        itemData = { tipo: client_1.OrdemItemType.SERVICO, servico: { connect: { id: itemId } }, quantidade, precoUnit: precoUnitario, subtotal: precoUnitario * quantidade };
+                    }
+                    else if (tipo === client_1.OrdemItemType.ADICIONAL) {
+                        const adicional = await tx.adicional.findUnique({ where: { id: itemId, empresaId: req.empresaId } });
+                        if (!adicional)
+                            throw new Error(`Adicional com ID ${itemId} não encontrado`);
+                        precoUnitario = adicional.preco;
+                        itemData = { tipo: client_1.OrdemItemType.ADICIONAL, adicional: { connect: { id: itemId } }, quantidade, precoUnit: precoUnitario, subtotal: precoUnitario * quantidade };
+                    }
+                    else {
+                        throw new Error('Tipo de item inválido. Use SERVICO ou ADICIONAL');
+                    }
+                    itensData.push(itemData);
+                    valorTotal += itemData.subtotal;
                 }
-            });
-            if (!lavador) {
-                return res.status(404).json({ error: 'Lavador não encontrado ou inativo' });
+                dataToUpdate.items = { create: itensData };
+                dataToUpdate.valorTotal = valorTotal;
             }
-        }
-        // Determinar o status com base no lavadorId se não for explicitamente fornecido
-        let finalStatus = status;
-        if (!status && lavadorId !== undefined) {
-            finalStatus = lavadorId ? 'EM_ANDAMENTO' : 'PENDENTE';
-        }
-        const ordem = await prisma.ordemServico.update({
-            where: { id },
-            data: {
-                ...(finalStatus && { status: finalStatus }),
-                ...(lavadorId !== undefined && { lavadorId }),
-                ...(observacoes !== undefined && { observacoes }),
-                ...(finalStatus === 'FINALIZADO' && { dataFim: new Date() })
-            },
-            include: {
-                cliente: {
-                    select: {
-                        id: true,
-                        nome: true,
-                        telefone: true
+            // Recalcular comissão se o lavador ou o valor total mudou
+            if (itens || lavadorId !== existingOrdem.lavadorId) {
+                let comissaoCalculada = 0;
+                const valorParaCalculo = Number(dataToUpdate.valorTotal?.toString() || existingOrdem.valorTotal.toString());
+                if (lavadorId) {
+                    const lavador = await tx.lavador.findUnique({ where: { id: lavadorId } });
+                    if (lavador && lavador.comissao > 0) {
+                        comissaoCalculada = valorParaCalculo * (lavador.comissao / 100);
                     }
-                },
-                veiculo: {
-                    select: {
-                        id: true,
-                        placa: true,
-                        modelo: true,
-                        cor: true
-                    }
-                },
-                lavador: {
-                    select: {
-                        id: true,
-                        nome: true,
-                        comissao: true
-                    }
-                },
-                items: {
-                    include: {
-                        servico: {
-                            select: {
-                                id: true,
-                                nome: true
-                            }
-                        },
-                        adicional: {
-                            select: {
-                                id: true,
-                                nome: true
-                            }
-                        }
+                }
+                dataToUpdate.comissao = comissaoCalculada;
+            }
+            // Se o status está sendo mudado para FINALIZADO, recalcula a comissão final
+            // para garantir que está correta, mesmo que o lavador não tenha sido alterado.
+            if (status === 'FINALIZADO' && existingOrdem.status !== 'FINALIZADO') {
+                const valorFinal = Number(dataToUpdate.valorTotal?.toString() || existingOrdem.valorTotal.toString());
+                const lavadorFinalId = lavadorId || existingOrdem.lavadorId;
+                if (lavadorFinalId) {
+                    const lavador = await tx.lavador.findUnique({ where: { id: lavadorFinalId } });
+                    if (lavador && lavador.comissao > 0) {
+                        dataToUpdate.comissao = valorFinal * (lavador.comissao / 100);
                     }
                 }
             }
+            if (status && status === 'FINALIZADO' && !existingOrdem.dataFim) {
+                dataToUpdate.dataFim = new Date();
+            }
+            const ordem = await tx.ordemServico.update({
+                where: { id },
+                data: dataToUpdate,
+                include: {
+                    cliente: { select: { id: true, nome: true, telefone: true } },
+                    veiculo: { select: { id: true, placa: true, modelo: true, cor: true } },
+                    lavador: { select: { id: true, nome: true, comissao: true } },
+                    items: { include: { servico: { select: { id: true, nome: true } }, adicional: { select: { id: true, nome: true } } } }
+                },
+            });
+            return ordem;
         });
-        res.json({
-            message: 'Ordem de serviço atualizada com sucesso',
-            ordem
+        // Enviar notificação após a transação ser bem-sucedida
+        await (0, notificationService_1.createNotification)({
+            empresaId: req.empresaId,
+            mensagem: `A ordem #${updatedOrdemResult.numeroOrdem} (${updatedOrdemResult.cliente.nome}) foi atualizada.`,
+            link: `ordens.html?id=${updatedOrdemResult.id}`,
+            type: 'ordemEditada'
         });
+        res.json({ message: 'Ordem de serviço atualizada com sucesso', ordem: updatedOrdemResult });
     }
     catch (error) {
         console.error('Erro ao atualizar ordem de serviço:', error);
-        res.status(500).json({ error: 'Erro interno do servidor' });
+        res.status(error.message === 'Ordem de serviço não encontrada' ? 404 : 500).json({ error: error.message || 'Erro interno do servidor' });
     }
 };
 exports.updateOrdem = updateOrdem;
@@ -477,7 +530,7 @@ const cancelOrdem = async (req, res) => {
     try {
         const { id } = req.params;
         // Verificar se ordem existe e pertence à empresa
-        const ordem = await prisma.ordemServico.findFirst({
+        const ordem = await db_1.default.ordemServico.findFirst({
             where: {
                 id,
                 empresaId: req.empresaId
@@ -492,7 +545,7 @@ const cancelOrdem = async (req, res) => {
                 error: 'Não é possível cancelar ordem já finalizada ou cancelada'
             });
         }
-        const updatedOrdem = await prisma.ordemServico.update({
+        const updatedOrdem = await db_1.default.ordemServico.update({
             where: { id },
             data: {
                 status: 'CANCELADO'
@@ -554,47 +607,62 @@ exports.cancelOrdem = cancelOrdem;
  */
 const getOrdensStats = async (req, res) => {
     try {
-        const { dataInicio, dataFim } = req.query;
+        const { dataInicio, dataFim, lavadorId, servicoId } = req.query;
         const where = {
-            empresaId: req.empresaId
+            empresaId: req.empresaId,
+            status: 'FINALIZADO' // Garante que todas as estatísticas sejam baseadas apenas em ordens finalizadas
         };
         if (dataInicio || dataFim) {
-            where.createdAt = {};
-            if (dataInicio) {
-                where.createdAt.gte = new Date(dataInicio);
+            where.dataFim = {};
+            if (dataInicio && dataInicio !== '') {
+                const start = new Date(dataInicio);
+                start.setUTCHours(0, 0, 0, 0);
+                if (where.dataFim)
+                    where.dataFim.gte = start;
             }
-            if (dataFim) {
-                where.createdAt.lte = new Date(dataFim);
+            if (dataFim && dataFim !== '') {
+                const end = new Date(dataFim);
+                end.setUTCHours(23, 59, 59, 999);
+                if (where.dataFim)
+                    where.dataFim.lte = end;
             }
         }
+        if (lavadorId) {
+            where.lavadorId = lavadorId;
+        }
+        if (servicoId) {
+            where.items = {
+                some: {
+                    servicoId: servicoId,
+                    tipo: 'SERVICO'
+                }
+            };
+        }
         // Primeiro, obter os IDs das ordens que atendem aos critérios
-        const ordensIds = await prisma.ordemServico.findMany({
+        const ordensIds = await db_1.default.ordemServico.findMany({
             where,
             select: { id: true }
         });
-        const ordensIdsList = ordensIds.map(o => o.id);
+        const ordensIdsList = ordensIds.map((o) => o.id);
         const [ordensPorStatus, valorTotal, ordensFinalizadas, topServicos, topLavadores] = await Promise.all([
-            prisma.ordemServico.groupBy({
+            db_1.default.ordemServico.groupBy({
                 by: ['status'],
                 where,
                 _count: {
                     status: true
                 }
             }),
-            prisma.ordemServico.aggregate({
+            db_1.default.ordemServico.aggregate({
                 where,
                 _sum: {
                     valorTotal: true
                 }
             }),
-            prisma.ordemServico.count({
-                where: {
-                    ...where,
-                    status: 'FINALIZADO'
-                }
+            db_1.default.ordemServico.count({
+                where: where // O status já está no 'where' principal
             }),
             // Corrigido: usar ordemId em vez de relação aninhada
-            prisma.ordemServicoItem.groupBy({
+            db_1.default.ordemServicoItem.groupBy({
                 by: ['servicoId'],
                 where: {
                     ordemId: { in: ordensIdsList },
@@ -614,7 +682,7 @@ const getOrdensStats = async (req, res) => {
                 },
                 take: 5
             }),
-            prisma.ordemServico.groupBy({
+            db_1.default.ordemServico.groupBy({
                 by: ['lavadorId'],
                 where: {
                     ...where,
@@ -636,18 +704,18 @@ const getOrdensStats = async (req, res) => {
         ]);
         // Buscar detalhes dos serviços e lavadores
         const [servicosDetalhes, lavadoresDetalhes] = await Promise.all([
-            prisma.servico.findMany({
+            db_1.default.servico.findMany({
                 where: {
-                    id: { in: topServicos.map(s => s.servicoId).filter(Boolean) }
+                    id: { in: topServicos.map((s) => s.servicoId).filter(Boolean) }
                 },
                 select: {
                     id: true,
                     nome: true
                 }
             }),
-            prisma.lavador.findMany({
+            db_1.default.lavador.findMany({
                 where: {
-                    id: { in: topLavadores.map(l => l.lavadorId).filter(Boolean) }
+                    id: { in: topLavadores.map((l) => l.lavadorId).filter(Boolean) }
                 },
                 select: {
                     id: true,
@@ -662,7 +730,7 @@ const getOrdensStats = async (req, res) => {
         const taxaConclusao = totalOrdensCount > 0 ? (ordensFinalizadas / totalOrdensCount) * 100 : 0;
         const ticketMedio = ordensFinalizadas > 0 ? valorTotalFormatado / ordensFinalizadas : 0;
         // Estatísticas de pagamentos
-        const pagamentosStats = await prisma.pagamento.groupBy({
+        const pagamentosStats = await db_1.default.pagamento.groupBy({
             by: ['metodo'],
             where: {
                 empresaId: req.empresaId,
@@ -676,7 +744,7 @@ const getOrdensStats = async (req, res) => {
                 _all: true
             }
         });
-        const pagamentosPendentes = await prisma.pagamento.aggregate({
+        const pagamentosPendentes = await db_1.default.pagamento.aggregate({
             where: {
                 empresaId: req.empresaId,
                 status: 'PENDENTE',
@@ -695,7 +763,7 @@ const getOrdensStats = async (req, res) => {
             taxaConclusao: Math.round(taxaConclusao * 100) / 100,
             ticketMedio: Math.round(ticketMedio * 100) / 100,
             // Top serviços (formato compatível com frontend)
-            topServicos: topServicos.map(ts => ({
+            topServicos: topServicos.map((ts) => ({
                 ...ts,
                 _sum: {
                     quantidade: ts._sum.quantidade || 0
@@ -706,7 +774,7 @@ const getOrdensStats = async (req, res) => {
                 servico: servicosDetalhes.find(s => s.id === ts.servicoId)
             })),
             // Top lavadores (formato compatível com frontend)
-            topLavadores: topLavadores.map(tl => ({
+            topLavadores: topLavadores.map((tl) => ({
                 ...tl,
                 _sum: {
                     valorTotal: tl._sum.valorTotal || 0
@@ -733,33 +801,42 @@ exports.getOrdensStats = getOrdensStats;
 const deleteOrdem = async (req, res) => {
     try {
         const { id } = req.params;
-        // Verificar se ordem existe e pertence à empresa
-        const ordem = await prisma.ordemServico.findFirst({
+        // Verificar se ordem existe e pertence à empresa, incluindo dados para a notificação
+        const ordem = await db_1.default.ordemServico.findFirst({
             where: {
                 id,
                 empresaId: req.empresaId
+            },
+            include: {
+                cliente: { select: { nome: true } }
             }
         });
         if (!ordem) {
             return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
         }
         // Deletar pagamentos associados
-        await prisma.pagamento.deleteMany({
+        await db_1.default.pagamento.deleteMany({
             where: {
                 ordemId: id
             }
         });
         // Deletar os itens da ordem primeiro (devido à restrição de chave estrangeira)
-        await prisma.ordemServicoItem.deleteMany({
+        await db_1.default.ordemServicoItem.deleteMany({
             where: {
                 ordemId: id
             }
         });
         // Deletar a ordem
-        await prisma.ordemServico.delete({
+        await db_1.default.ordemServico.delete({
             where: {
                 id
             }
+        });
+        // Enviar notificação após a exclusão
+        await (0, notificationService_1.createNotification)({
+            empresaId: req.empresaId,
+            mensagem: `A ordem #${ordem.numeroOrdem} (${ordem.cliente.nome}) foi excluída.`,
+            type: 'ordemDeletada' // O link é opcional aqui
         });
         res.json({
             message: 'Ordem de serviço deletada com sucesso'
@@ -771,4 +848,79 @@ const deleteOrdem = async (req, res) => {
     }
 };
 exports.deleteOrdem = deleteOrdem;
+/**
+ * Itera sobre as empresas para finalizar ordens do dia conforme o horário de fechamento.
+ * Esta função é chamada pelo cron job a cada 15 minutos.
+ */
+const processarFinalizacoesAutomaticas = async () => {
+    const agora = new Date();
+    try {
+        const empresas = await db_1.default.empresa.findMany({
+            where: { finalizacaoAutomatica: true, ativo: true },
+        });
+        if (empresas.length === 0) {
+            return; // Nenhuma empresa para processar
+        }
+        console.log(`[${agora.toISOString()}] Verificando ${empresas.length} empresa(s) para finalização automática.`);
+        for (const empresa of empresas) {
+            const horarioFechamento = empresa.horarioFechamento || '19:00';
+            const [horas, minutos] = horarioFechamento.split(':').map(Number);
+            const dataFechamento = new Date();
+            dataFechamento.setHours(horas, minutos, 0, 0);
+            // Se a hora atual for posterior à hora de fechamento da empresa, processa.
+            if (agora >= dataFechamento) {
+                try {
+                    const horarioAbertura = empresa.horarioAbertura || '07:00';
+                    const [hAbertura, mAbertura] = horarioAbertura.split(':').map(Number);
+                    const inicioDoDia = new Date();
+                    inicioDoDia.setHours(hAbertura, mAbertura, 0, 0);
+                    const ordensParaFinalizar = await db_1.default.ordemServico.findMany({
+                        where: {
+                            empresaId: empresa.id,
+                            status: { in: ['PENDENTE', 'EM_ANDAMENTO'] },
+                        },
+                    });
+                    if (ordensParaFinalizar.length > 0) {
+                        console.log(`[${agora.toISOString()}] Finalizando ${ordensParaFinalizar.length} ordens para a empresa: ${empresa.nome}`);
+                        const transacoes = ordensParaFinalizar.map((ordem) => db_1.default.ordemServico.update({
+                            where: { id: ordem.id },
+                            data: {
+                                status: 'FINALIZADO',
+                                dataFim: new Date(),
+                                pagamentos: {
+                                    create: {
+                                        empresaId: empresa.id,
+                                        valor: ordem.valorTotal, // TODO: Check if this should be the remaining amount
+                                        metodo: client_1.MetodoPagamento.PENDENTE,
+                                        status: 'PENDENTE',
+                                    },
+                                },
+                            },
+                        }));
+                        await db_1.default.$transaction(transacoes);
+                        console.log(`[${agora.toISOString()}] Ordens da empresa ${empresa.nome} finalizadas com sucesso.`);
+                        // Criar notificação para o usuário
+                        const totalFinalizadas = ordensParaFinalizar.length;
+                        const mensagem = totalFinalizadas === 1
+                            ? '1 ordem de serviço foi finalizada automaticamente.'
+                            : `${totalFinalizadas} ordens de serviço foram finalizadas automaticamente.`;
+                        await (0, notificationService_1.createNotification)({
+                            empresaId: empresa.id,
+                            mensagem: mensagem,
+                            link: 'ordens.html?status=FINALIZADO', // Link para a página de ordens filtrada
+                            type: 'finalizacaoAutomatica'
+                        });
+                    }
+                }
+                catch (error) {
+                    console.error(`[${agora.toISOString()}] Erro ao processar finalização para a empresa ${empresa.nome}:`, error);
+                }
+            }
+        }
+    }
+    catch (error) {
+        console.error(`[${agora.toISOString()}] Erro geral no processo de finalização automática:`, error);
+    }
+};
+exports.processarFinalizacoesAutomaticas = processarFinalizacoesAutomaticas;
 //# sourceMappingURL=ordemController.js.map

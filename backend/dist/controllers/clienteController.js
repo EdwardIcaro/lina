@@ -1,8 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getClienteByPlaca = exports.deleteCliente = exports.updateCliente = exports.getClienteById = exports.getClientes = exports.createCliente = void 0;
-const prisma_1 = require("../generated/prisma");
-const prisma = new prisma_1.PrismaClient();
+const db_1 = __importDefault(require("../db"));
 /**
  * Criar novo cliente
  */
@@ -15,11 +17,11 @@ const createCliente = async (req, res) => {
             });
         }
         // Verificar se cliente já existe na mesma empresa
-        const existingCliente = await prisma.cliente.findFirst({
+        const existingCliente = await db_1.default.cliente.findFirst({
             where: {
                 empresaId: req.empresaId,
                 OR: [
-                    ...(email ? [{ email }] : []),
+                    ...(email ? [{ email: email }] : []),
                     ...(telefone ? [{ telefone }] : [])
                 ]
             }
@@ -29,12 +31,12 @@ const createCliente = async (req, res) => {
                 error: 'Cliente com este email ou telefone já existe'
             });
         }
-        const cliente = await prisma.cliente.create({
+        const cliente = await db_1.default.cliente.create({
             data: {
                 empresaId: req.empresaId,
                 nome,
-                telefone,
-                email
+                telefone: telefone || null,
+                email: email || null, // Garante que email vazio seja salvo como null
             },
             include: {
                 veiculos: true,
@@ -62,7 +64,7 @@ exports.createCliente = createCliente;
  */
 const getClientes = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search } = req.query;
+        const { page = 1, limit = 100, search } = req.query; // Define valores padrão
         const skip = (Number(page) - 1) * Number(limit);
         // Construir filtro de busca
         const where = {
@@ -76,7 +78,7 @@ const getClientes = async (req, res) => {
             ];
         }
         const [clientes, total] = await Promise.all([
-            prisma.cliente.findMany({
+            db_1.default.cliente.findMany({
                 where,
                 include: {
                     veiculos: {
@@ -129,7 +131,7 @@ const getClientes = async (req, res) => {
                 skip,
                 take: Number(limit)
             }),
-            prisma.cliente.count({ where })
+            db_1.default.cliente.count({ where })
         ]);
         res.json({
             clientes,
@@ -153,15 +155,26 @@ exports.getClientes = getClientes;
 const getClienteById = async (req, res) => {
     try {
         const { id } = req.params;
-        const cliente = await prisma.cliente.findFirst({
+        const cliente = await db_1.default.cliente.findFirst({
             where: {
                 id,
                 empresaId: req.empresaId
             },
             include: {
                 veiculos: {
-                    orderBy: {
-                        createdAt: 'desc'
+                    orderBy: { createdAt: 'desc' },
+                    include: {
+                        ordens: {
+                            where: { status: 'FINALIZADO' },
+                            orderBy: { createdAt: 'desc' },
+                            take: 1,
+                            include: {
+                                items: {
+                                    take: 1, // Pega apenas o primeiro item para simplificar
+                                    include: { servico: { include: { tiposVeiculo: true } } }
+                                }
+                            }
+                        }
                     }
                 },
                 ordens: {
@@ -210,7 +223,7 @@ const updateCliente = async (req, res) => {
         const { id } = req.params;
         const { nome, telefone, email, ativo } = req.body;
         // Verificar se cliente existe e pertence à empresa
-        const existingCliente = await prisma.cliente.findFirst({
+        const existingCliente = await db_1.default.cliente.findFirst({
             where: {
                 id,
                 empresaId: req.empresaId
@@ -221,14 +234,14 @@ const updateCliente = async (req, res) => {
         }
         // Verificar duplicidade de email/telefone
         if (email || telefone) {
-            const duplicateCliente = await prisma.cliente.findFirst({
+            const duplicateCliente = await db_1.default.cliente.findFirst({
                 where: {
                     AND: [
                         { empresaId: req.empresaId },
                         { id: { not: id } },
                         {
                             OR: [
-                                ...(email ? [{ email }] : []),
+                                ...(email ? [{ email: email }] : []),
                                 ...(telefone ? [{ telefone }] : [])
                             ]
                         }
@@ -241,12 +254,12 @@ const updateCliente = async (req, res) => {
                 });
             }
         }
-        const cliente = await prisma.cliente.update({
+        const cliente = await db_1.default.cliente.update({
             where: { id },
             data: {
                 ...(nome && { nome }),
-                ...(telefone !== undefined && { telefone }),
-                ...(email !== undefined && { email }),
+                ...(telefone !== undefined && { telefone: telefone || null }),
+                ...(email !== undefined && { email: email || null }), // Garante que email vazio seja salvo como null
                 ...(ativo !== undefined && { ativo })
             },
             include: {
@@ -277,7 +290,7 @@ const deleteCliente = async (req, res) => {
     try {
         const { id } = req.params;
         // Verificar se cliente existe e pertence à empresa
-        const cliente = await prisma.cliente.findFirst({
+        const cliente = await db_1.default.cliente.findFirst({
             where: {
                 id,
                 empresaId: req.empresaId
@@ -300,7 +313,7 @@ const deleteCliente = async (req, res) => {
                 error: 'Não é possível excluir cliente com ordens de serviço ou veículos cadastrados'
             });
         }
-        await prisma.cliente.delete({
+        await db_1.default.cliente.delete({
             where: { id }
         });
         res.json({
@@ -319,7 +332,7 @@ exports.deleteCliente = deleteCliente;
 const getClienteByPlaca = async (req, res) => {
     try {
         const { placa } = req.params;
-        const veiculo = await prisma.veiculo.findFirst({
+        const veiculo = await db_1.default.veiculo.findFirst({
             where: {
                 placa: { equals: placa },
                 cliente: {
@@ -327,16 +340,7 @@ const getClienteByPlaca = async (req, res) => {
                 }
             },
             include: {
-                cliente: {
-                    include: {
-                        veiculos: true,
-                        _count: {
-                            select: {
-                                ordens: true
-                            }
-                        }
-                    }
-                }
+                cliente: true
             }
         });
         if (!veiculo) {

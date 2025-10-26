@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '../generated/prisma';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import prisma from '../db';
 
-const prisma = new PrismaClient();
 
 /**
  * Criar novo usuário
@@ -33,6 +33,36 @@ export const createUsuario = async (req: Request, res: Response) => {
     res.status(201).json({ message: 'Usuário criado com sucesso', usuario });
   } catch (error) {
     console.error('Erro ao criar usuário:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+};
+
+/**
+ * Gera um novo token com o escopo de uma empresa específica
+ */
+export const generateScopedToken = async (req: Request, res: Response) => {
+  const usuarioId = (req as any).usuarioId;
+  const { empresaId } = req.body;
+
+  if (!empresaId) {
+    return res.status(400).json({ error: 'empresaId é obrigatório' });
+  }
+
+  try {
+    const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+    if (!usuario) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    const token = jwt.sign(
+      { id: usuario.id, nome: usuario.nome, empresaId }, // Agora inclui o empresaId
+      process.env.JWT_SECRET || 'seu_segredo_jwt_aqui',
+      { expiresIn: '1d' }
+    );
+
+    res.json({ token });
+  } catch (error) {
+    console.error('Erro ao gerar token com escopo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 };
@@ -71,12 +101,20 @@ export const authenticateUsuario = async (req: Request, res: Response) => {
 
     const { senha: _, ...usuarioData } = usuario;
 
+    // Gerar token JWT
+    const token = jwt.sign(
+      { id: usuario.id, nome: usuario.nome },
+      process.env.JWT_SECRET || 'seu_segredo_jwt_aqui', // Use uma variável de ambiente!
+      { expiresIn: '1d' } // Token expira em 1 dia
+    );
+
     res.json({
       message: 'Autenticação realizada com sucesso',
       usuario: {
         ...usuarioData,
         empresas,
       },
+      token, // Envia o token para o frontend
     });
   } catch (error) {
     console.error('Erro na autenticação:', error);

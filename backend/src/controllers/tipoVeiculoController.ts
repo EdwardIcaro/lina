@@ -1,90 +1,57 @@
 import { Request, Response } from 'express';
-import { Prisma, PrismaClient } from '../generated/prisma';
+import prisma from '../db';
 
-const prisma = new PrismaClient();
-
-// Inicialização do cliente Prisma para conexão com o banco de dados
+// const prisma = new PrismaClient(); // Removido para usar a instância global
 
 interface EmpresaRequest extends Request {
   empresaId?: string;
-  empresa?: any;
 }
 
 /**
- * Criar novo tipo de veículo
+ * Criar novo tipo de veículo (ex: "CARRO", "MOTO") ou subtipo (ex: "CARRO/SUV")
  */
 export const createTipoVeiculo = async (req: EmpresaRequest, res: Response) => {
   try {
-    const { nome, categoria, descricao, ativo } = req.body;
+    const { nome, categoria, descricao } = req.body;
 
     if (!nome) {
-      return res.status(400).json({ 
-        error: 'Nome é obrigatório' 
-      });
+      return res.status(400).json({ error: 'O nome do tipo de veículo é obrigatório.' });
     }
 
     const novoTipoVeiculo = await prisma.tipoVeiculo.create({
       data: {
-        empresaId: req.empresaId!,
         nome,
         categoria,
         descricao,
-        ativo
-      }
+        empresaId: req.empresaId!,
+      },
     });
 
-    res.status(201).json({
-      message: 'Tipo de veículo criado com sucesso',
-      tipoVeiculo: novoTipoVeiculo
-    });
-  } catch (error) {
+    res.status(201).json(novoTipoVeiculo);
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Este tipo/subtipo de veículo já existe.' });
+    }
     console.error('Erro ao criar tipo de veículo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 };
 
 /**
- * Listar tipos de veículo (com paginação)
+ * Listar todos os tipos e subtipos de veículo da empresa
  */
 export const getTiposVeiculo = async (req: EmpresaRequest, res: Response) => {
   try {
-    const { page = 1, limit = 10, search, ativo } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
-
-    const where: Prisma.TipoVeiculoWhereInput = {
-      empresaId: req.empresaId
-    };
-
-    if (search) {
-      where.OR = [
-        { nome: { contains: search as string } },
-        { categoria: { contains: search as string } }
-      ];
-    }
-
-    if (ativo !== undefined) {
-      where.ativo = ativo === 'true';
-    }
-
-    const [tiposVeiculo, total] = await Promise.all([
-      prisma.tipoVeiculo.findMany({
-        where,
-        skip,
-        take: Number(limit),
-        orderBy: { nome: 'asc' }
-      }),
-      prisma.tipoVeiculo.count({ where })
-    ]);
-
-    res.status(200).json({
-      tiposVeiculo,
-      meta: {
-        total,
-        page: Number(page),
-        limit: Number(limit),
-        pages: Math.ceil(total / Number(limit))
-      }
+    const tiposVeiculo = await prisma.tipoVeiculo.findMany({
+      where: {
+        empresaId: req.empresaId,
+      },
+      orderBy: [
+        { nome: 'asc' },
+        { categoria: 'asc' },
+      ],
     });
+    res.json(tiposVeiculo);
   } catch (error) {
     console.error('Erro ao listar tipos de veículo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
@@ -92,24 +59,28 @@ export const getTiposVeiculo = async (req: EmpresaRequest, res: Response) => {
 };
 
 /**
- * Obter tipo de veículo por ID
+ * Buscar um tipo de veículo por ID
  */
-export const getTipoVeiculoById = async (req: Request, res: Response) => {
+export const getTipoVeiculoById = async (req: EmpresaRequest, res: Response) => {
   try {
     const { id } = req.params;
-
-    const tipoVeiculo = await prisma.tipoVeiculo.findUnique({
-      where: { id },
+    const tipoVeiculo = await prisma.tipoVeiculo.findFirst({
+      where: {
+        id,
+        empresaId: req.empresaId,
+      },
       include: {
-        servicos: true
+        _count: {
+          select: { servicos: true }
+        }
       }
     });
 
     if (!tipoVeiculo) {
-      return res.status(404).json({ error: 'Tipo de veículo não encontrado' });
+      return res.status(404).json({ error: 'Tipo de veículo não encontrado.' });
     }
 
-    res.status(200).json(tipoVeiculo);
+    res.json(tipoVeiculo);
   } catch (error) {
     console.error('Erro ao buscar tipo de veículo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
@@ -117,95 +88,121 @@ export const getTipoVeiculoById = async (req: Request, res: Response) => {
 };
 
 /**
- * Atualizar tipo de veículo
+ * Atualizar um tipo de veículo
  */
-export const updateTipoVeiculo = async (req: Request, res: Response) => {
+export const updateTipoVeiculo = async (req: EmpresaRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { nome, categoria, descricao, ativo } = req.body;
 
-    const tipoVeiculo = await prisma.tipoVeiculo.findUnique({
-      where: { id }
-    });
-
-    if (!tipoVeiculo) {
-      return res.status(404).json({ error: 'Tipo de veículo não encontrado' });
-    }
-
     const tipoVeiculoAtualizado = await prisma.tipoVeiculo.update({
-      where: { id },
+      where: {
+        id,
+        empresaId: req.empresaId,
+      },
       data: {
-        ...(nome && { nome }),
-        ...(categoria !== undefined && { categoria }),
-        ...(descricao !== undefined && { descricao }),
-        ...(ativo !== undefined && { ativo })
-      }
+        nome,
+        categoria,
+        descricao,
+        ativo,
+      },
     });
 
-    res.status(200).json({
-      message: 'Tipo de veículo atualizado com sucesso',
-      tipoVeiculo: tipoVeiculoAtualizado
-    });
-  } catch (error) {
+    res.json(tipoVeiculoAtualizado);
+  } catch (error: any) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Tipo de veículo não encontrado.' });
+    }
     console.error('Erro ao atualizar tipo de veículo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 };
 
 /**
- * Excluir tipo de veículo
+ * Excluir um tipo de veículo
  */
-export const deleteTipoVeiculo = async (req: Request, res: Response) => {
+export const deleteTipoVeiculo = async (req: EmpresaRequest, res: Response) => {
   try {
     const { id } = req.params;
 
-    // Verificar se o tipo de veículo está sendo usado em algum serviço
-    const servicosComTipo = await prisma.servico.count({
+    // Verificar se há serviços associados antes de excluir
+    const servicosAssociados = await prisma.servico.count({
       where: {
-        tipoVeiculoId: id
+        tiposVeiculo: {
+          some: { id }
+        }
       }
     });
 
-    if (servicosComTipo > 0) {
-      return res.status(400).json({ 
-        error: 'Não é possível excluir este tipo de veículo pois existem serviços associados a ele' 
-      });
+    if (servicosAssociados > 0) {
+      return res.status(400).json({ error: 'Não é possível excluir. Existem serviços associados a este tipo de veículo.' });
     }
 
     await prisma.tipoVeiculo.delete({
-      where: { id }
+      where: {
+        id,
+        empresaId: req.empresaId,
+      },
     });
 
-    res.status(200).json({ message: 'Tipo de veículo excluído com sucesso' });
-  } catch (error) {
+    res.status(204).send();
+  } catch (error: any) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Tipo de veículo não encontrado.' });
+    }
     console.error('Erro ao excluir tipo de veículo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 };
 
 /**
- * Listar subtipos de veículo (categorias) por tipo
+ * Listar serviços associados a um tipo de veículo
+ */
+export const getServicosByTipoVeiculo = async (req: EmpresaRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const servicos = await prisma.servico.findMany({
+      where: {
+        empresaId: req.empresaId,
+        tiposVeiculo: {
+          some: {
+            id: id,
+          },
+        },
+      },
+    });
+    res.json(servicos);
+  } catch (error) {
+    console.error('Erro ao listar serviços por tipo de veículo:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+};
+
+/**
+ * Listar todos os subtipos (categorias) de um tipo de veículo principal.
+ * Ex: /api/tipos-veiculo/subtipos/Carro -> retorna ["Hatch", "Sedan", "SUV"]
  */
 export const getSubtiposByTipo = async (req: EmpresaRequest, res: Response) => {
   try {
-    const { categoria } = req.params;
+    const { categoria: nomeTipo } = req.params;
 
     const subtipos = await prisma.tipoVeiculo.findMany({
       where: {
         empresaId: req.empresaId,
-        categoria: categoria,
+        nome: nomeTipo,
+        categoria: {
+          not: null, // Garante que estamos pegando apenas subtipos
+        },
       },
+      distinct: ['categoria'],
       select: {
-        id: true,
-        nome: true,
         categoria: true,
-        descricao: true
-      }
+      },
     });
 
-    res.status(200).json(subtipos);
+    res.json(subtipos.map((s: { categoria: string | null }) => s.categoria));
   } catch (error) {
-    console.error('Erro ao listar subtipos de veículo:', error);
+    console.error(`Erro ao listar subtipos para ${req.params.categoria}:`, error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 };

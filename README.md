@@ -1,18 +1,26 @@
 # 🚀 Lina X - Sistema para Lava Jato
 
-![Lina X](https://img.shields.io/badge/Lina%20X-Sistema%20para%20Lava%20Jato-7F56D9?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZmZmZiI+PHBhdGggZD0iTTE5LjM2IDIuMDhsLTEuNzQgMi4xOUMxOS4wNyA1LjYyIDE5IDcuMjUgMTkgOC45OFYxOWMwIDAuNTUtMC40NSAxLTEgMWgtMWMtMC41NSAwLTEtMC40NS0xLTFWOC45OGMwLTEuMS0wLjU0LTIuMS0xLjM4LTIuNzJMOS4zMyAyLjU5Yy0wLjgxLTAuNTktMS44Ni0wNTktMi42NyAwTDQuMDQgNC4yN0MzLjUgNC44MyAzLjI1IDUuNTcgMy4yNSA2LjM1VjE5YzAgMC41NS0wLj00IDEuMDEtMC41IDEuNDlsLTAuNSAxLjQ5QzIgMjEuOTggMiA1MjIgMiA1MjJoMjBjMC0wLjAxIDAtMC4wMi0wLjA1LTAuNTFsLTAuNS0xLjQ5QzE5LjQ0IDE5Ljk5IDE5IDE5LjU1IDE5IDE5VjguOThjMC0xLjczLTAuOTMtMy4zNi0yLjM2LTMuOTJ6TTUgMTloMTBWOEMxNSAzLjU4IDEwLjczIDIgOC4xMiAyYy0xLjM4IDAtMi42MyAwLjU5LTMuNDQgMS41TDUgMy45OFYxOXoiLz48L3N2Zz4=)
-
 O Lina X é um sistema de gestão completo e moderno para lava jatos, projetado para otimizar a operação diária, desde a criação de ordens de serviço até o acompanhamento financeiro e de desempenho dos funcionários.
 
 ## ✨ Principais Funcionalidades
 
-*   **Gestão de Ordens de Serviço**: Crie, edite, atualize o status e gerencie o ciclo de vida completo das ordens de serviço.
-*   **Fluxo de Nova Ordem Inteligente**: Um fluxo guiado que começa pela seleção do tipo de veículo (Carro, Moto, etc.) e subtipo (Hatch, Sedan, SUV), garantindo a precificação correta e agilidade no atendimento.
-*   **Gestão de Clientes e Veículos**: Cadastro completo de clientes e seus veículos. A busca inteligente por placa ou nome facilita a identificação e evita duplicidade de dados.
-*   **Gestão de Funcionários (Lavadores)**: Acompanhe o desempenho individual, calcule comissões e gere links públicos para que cada lavador possa visualizar suas ordens e ganhos diários.
-*   **Controle Financeiro**: Dashboard com estatísticas de faturamento, ticket médio, serviços mais populares e pagamentos pendentes.
-*   **Configurações Flexíveis**: Cadastre serviços, adicionais e defina preços específicos por categoria de veículo, adaptando o sistema à realidade do seu negócio.
-*   **Interface Moderna**: Design inspirado no Windows 11, com cantos arredondados, efeitos de transparência e uma experiência de usuário intuitiva.
+*   **Dashboard Inteligente**: Visão geral do dia com faturamento, total de ordens, ordens em andamento e concluídas.
+*   **Gestão de Ordens de Serviço**: Ciclo completo de ordens, desde a criação até a finalização e pagamento, com status visuais (Pendente, Em Andamento, Finalizado).
+*   **Fluxo de Nova Ordem Otimizado**: Processo guiado que começa pela seleção do tipo e subtipo de veículo, garantindo a precificação correta e agilidade no atendimento.
+*   **Gestão de Clientes (CRM)**: Cadastro completo de clientes e seus veículos. Ficha detalhada com histórico de gastos, última visita, serviços mais utilizados e pendências.
+*   **Gestão de Funcionários (Lavadores)**:
+    *   Acompanhamento de desempenho individual.
+    *   Cálculo e fechamento de comissões, com abatimento automático de adiantamentos.
+    *   Geração de links públicos para que cada lavador visualize suas ordens e ganhos diários.
+*   **Controle Financeiro Completo**:
+    *   Registro de entradas (pagamentos de OS) e saídas (despesas, sangrias, adiantamentos).
+    *   Fechamento de caixa diário com conferência de valores (Dinheiro, PIX, Cartão).
+    *   Histórico de movimentações com filtros avançados por data, tipo e forma de pagamento.
+    *   Gestão de pagamentos pendentes com opção de quitação direta na tela financeira.
+*   **Configurações Flexíveis**:
+    *   Cadastro de serviços e adicionais com preços específicos por categoria de veículo.
+    *   Definição do horário de funcionamento do lava jato para alinhamento dos relatórios.
+*   **Interface Moderna e Intuitiva**: Design inspirado no Windows 11, com tema claro e escuro, focado na usabilidade e com notificações "toast" para feedback do usuário.
 
 ---
 
@@ -24,7 +32,7 @@ O projeto é dividido em duas partes principais: o backend (API) e o frontend (i
 *   **Node.js**: Ambiente de execução para o servidor.
 *   **Express**: Framework para a construção da API REST.
 *   **TypeScript**: Superset do JavaScript que adiciona tipagem estática.
-*   **Prisma**: ORM (Object-Relational Mapper) para interação com o banco de dados.
+*   **Prisma**: ORM (Object-Relational Mapper) moderno para interação com o banco de dados.
 *   **PostgreSQL**: Banco de dados relacional utilizado para persistir os dados.
 
 ### Frontend
@@ -56,12 +64,13 @@ npm install
 # 3. Configure o arquivo .env com a string de conexão do seu banco de dados
 # Exemplo de .env:
 # DATABASE_URL="postgresql://USUARIO:SENHA@localhost:5432/linax?schema=public"
+# SECRET_KEY="sua-chave-secreta-para-jwt"
 
-# 4. Execute as migrações do Prisma para criar as tabelas no banco
-npx prisma migrate dev
+# 4. Aplique o schema do Prisma ao seu banco de dados.
+npx prisma db push
 
-# 5. (Opcional) Execute o seed para popular o banco com dados iniciais
-npx prisma db seed
+# 5. (Opcional) Gere o cliente Prisma manualmente se necessário
+npx prisma generate
 
 # 6. Inicie o servidor em modo de desenvolvimento
 npm run dev
@@ -80,7 +89,6 @@ O frontend é composto por arquivos estáticos (`.html`, `.css`, `.js`).
 ---
 
 ## 📁 Estrutura do Projeto
-
 ```
 LinaX/
 ├── backend/         # Contém toda a lógica da API (Node.js, Express, Prisma)
@@ -98,4 +106,3 @@ LinaX/
 │   └── ...
 └── README.md        # Este arquivo
 ```
-

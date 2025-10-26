@@ -1,342 +1,121 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '../generated/prisma';
-
-const prisma = new PrismaClient();
+import prisma from '../db';
+import jwt from 'jsonwebtoken';
 
 interface EmpresaRequest extends Request {
   empresaId?: string;
-  empresa?: any;
 }
 
-/**
- * Criar novo lavador
- */
 export const createLavador = async (req: EmpresaRequest, res: Response) => {
+  const { nome, comissao } = req.body;
+  const empresaId = req.empresaId;
+
+  if (!nome || comissao === undefined) {
+    return res.status(400).json({ error: 'Nome e comissão são obrigatórios.' });
+  }
+
   try {
-    const { nome, comissao } = req.body;
-
-    if (!nome || comissao === undefined) {
-      return res.status(400).json({ 
-        error: 'Nome e comissão são obrigatórios' 
-      });
-    }
-
-    // Validar comissão (entre 0 e 100)
-    if (comissao < 0 || comissao > 100) {
-      return res.status(400).json({ 
-        error: 'Comissão deve estar entre 0 e 100' 
-      });
-    }
-
     const lavador = await prisma.lavador.create({
-      data: {
-        empresaId: req.empresaId!,
-        nome,
-        comissao
-      },
-      include: {
-        _count: {
-          select: {
-            ordens: true
-          }
-        }
-      }
+      data: { nome, comissao, empresaId: empresaId! },
     });
-
-    res.status(201).json({
-      message: 'Lavador criado com sucesso',
-      lavador
-    });
+    res.status(201).json(lavador);
   } catch (error) {
-    console.error('Erro ao criar lavador:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(500).json({ error: 'Erro ao criar lavador.' });
   }
 };
 
-/**
- * Listar lavadores da empresa (com paginação)
- */
 export const getLavadores = async (req: EmpresaRequest, res: Response) => {
   try {
-    const { page = 1, limit = 10, search, ativo } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
-
-    const where: any = {
-      empresaId: req.empresaId
-    };
-
-    if (search) {
-      where.nome = { contains: search as string };
-    }
-
-    if (ativo !== undefined) {
-      where.ativo = ativo === 'true';
-    }
-
-    const [lavadores, total] = await Promise.all([
-      prisma.lavador.findMany({
-        where,
-        include: {
-          _count: {
-            select: {
-              ordens: true
-            }
-          }
-        },
-        orderBy: {
-          nome: 'asc'
-        },
-        skip,
-        take: Number(limit)
-      }),
-      prisma.lavador.count({ where })
-    ]);
-
-    res.json({
-      lavadores,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / Number(limit))
-      }
-    });
-  } catch (error) {
-    console.error('Erro ao listar lavadores:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-};
-
-/**
- * Listar lavadores da empresa (formato simples para frontend)
- */
-export const getLavadoresSimple = async (req: EmpresaRequest, res: Response) => {
-  try {
-    const { ativo } = req.query;
-
-    const where: any = {
-      empresaId: req.empresaId
-    };
-
-    if (ativo !== undefined) {
-      where.ativo = ativo === 'true';
-    }
-
     const lavadores = await prisma.lavador.findMany({
-      where,
-      orderBy: {
-        nome: 'asc'
-      }
+      where: { empresaId: req.empresaId },
+      include: {
+        _count: {
+          select: { ordens: true }
+        }
+      },
+      orderBy: { nome: 'asc' },
     });
-
     res.json({ lavadores });
   } catch (error) {
-    console.error('Erro ao listar lavadores:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(500).json({ error: 'Erro ao buscar lavadores.' });
   }
 };
 
-/**
- * Buscar lavador por ID
- */
-export const getLavadorById = async (req: EmpresaRequest, res: Response) => {
+export const getLavadoresSimple = async (req: EmpresaRequest, res: Response) => {
   try {
-    const { id } = req.params;
-
-    const lavador = await prisma.lavador.findFirst({
-      where: {
-        id,
-        empresaId: req.empresaId
+    const lavadores = await prisma.lavador.findMany({
+      where: { 
+        empresaId: req.empresaId,
+        ativo: true 
       },
-      include: {
-        ordens: {
-          include: {
-            cliente: {
-              select: {
-                nome: true
-              }
-            },
-            veiculo: {
-              select: {
-                placa: true,
-                modelo: true
-              }
-            }
-          },
-          orderBy: {
-            createdAt: 'desc'
-          },
-          take: 10
-        },
-        _count: {
-          select: {
-            ordens: true
-          }
-        }
-      }
+      select: {
+        id: true,
+        nome: true,
+      },
+      orderBy: { nome: 'asc' },
     });
-
-    if (!lavador) {
-      return res.status(404).json({ error: 'Lavador não encontrado' });
-    }
-
-    // Calcular estatísticas
-    const totalOrdens = lavador._count.ordens;
-    const totalComissao = lavador.ordens.reduce((sum, ordem) => {
-      return sum + (ordem.valorTotal * (lavador.comissao / 100));
-    }, 0);
-
-    res.json({
-      ...lavador,
-      estatisticas: {
-        totalOrdens,
-        totalComissao,
-        mediaComissaoPorOrdem: totalOrdens > 0 ? totalComissao / totalOrdens : 0
-      }
-    });
+    res.json({ lavadores });
   } catch (error) {
-    console.error('Erro ao buscar lavador:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('Erro ao buscar lavadores (simples):', error);
+    res.status(500).json({ error: 'Erro ao buscar lavadores.' });
   }
 };
 
-/**
- * Atualizar lavador
- */
 export const updateLavador = async (req: EmpresaRequest, res: Response) => {
+  const { id } = req.params;
+  const { nome, comissao } = req.body;
+
   try {
-    const { id } = req.params;
-    const { nome, comissao, ativo } = req.body;
-
-    // Verificar se lavador existe e pertence à empresa
-    const existingLavador = await prisma.lavador.findFirst({
-      where: {
-        id,
-        empresaId: req.empresaId
-      }
-    });
-
-    if (!existingLavador) {
-      return res.status(404).json({ error: 'Lavador não encontrado' });
-    }
-
-    // Validar comissão se fornecida
-    if (comissao !== undefined && (comissao < 0 || comissao > 100)) {
-      return res.status(400).json({ 
-        error: 'Comissão deve estar entre 0 e 100' 
-      });
-    }
-
     const lavador = await prisma.lavador.update({
-      where: { id },
-      data: {
-        ...(nome && { nome }),
-        ...(comissao !== undefined && { comissao }),
-        ...(ativo !== undefined && { ativo })
-      },
-      include: {
-        _count: {
-          select: {
-            ordens: true
-          }
-        }
-      }
+      where: { id, empresaId: req.empresaId },
+      data: { nome, comissao },
     });
-
-    res.json({
-      message: 'Lavador atualizado com sucesso',
-      lavador
-    });
+    res.json(lavador);
   } catch (error) {
-    console.error('Erro ao atualizar lavador:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(500).json({ error: 'Erro ao atualizar lavador.' });
   }
 };
 
-/**
- * Excluir lavador
- */
 export const deleteLavador = async (req: EmpresaRequest, res: Response) => {
+  const { id } = req.params;
+
   try {
-    const { id } = req.params;
-
-    // Verificar se lavador existe e pertence à empresa
-    const lavador = await prisma.lavador.findFirst({
-      where: {
-        id,
-        empresaId: req.empresaId
-      },
-      include: {
-        _count: {
-          select: {
-            ordens: true
-          }
-        }
-      }
-    });
-
-    if (!lavador) {
-      return res.status(404).json({ error: 'Lavador não encontrado' });
-    }
-
-    // Não permitir excluir lavador com ordens de serviço
-    if (lavador._count.ordens > 0) {
-      return res.status(400).json({ 
-        error: 'Não é possível excluir lavador com ordens de serviço atribuídas' 
-      });
-    }
-
     await prisma.lavador.delete({
-      where: { id }
+      where: { id, empresaId: req.empresaId },
     });
-
-    res.json({
-      message: 'Lavador excluído com sucesso'
-    });
+    res.status(204).send();
   } catch (error) {
-    console.error('Erro ao excluir lavador:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(500).json({ error: 'Erro ao deletar lavador.' });
   }
 };
 
 /**
- * Ativar/Desativar lavador
+ * Gera um token JWT para a página pública do lavador.
  */
-export const toggleLavadorStatus = async (req: EmpresaRequest, res: Response) => {
-  try {
+export const gerarTokenPublico = async (req: EmpresaRequest, res: Response) => {
     const { id } = req.params;
+    const empresaId = req.empresaId;
 
-    const lavador = await prisma.lavador.findFirst({
-      where: {
-        id,
-        empresaId: req.empresaId
-      }
-    });
+    try {
+        const lavador = await prisma.lavador.findFirst({
+            where: { id, empresaId }
+        });
 
-    if (!lavador) {
-      return res.status(404).json({ error: 'Lavador não encontrado' });
-    }
-
-    const updatedLavador = await prisma.lavador.update({
-      where: { id },
-      data: {
-        ativo: !lavador.ativo
-      },
-      include: {
-        _count: {
-          select: {
-            ordens: true
-          }
+        if (!lavador) {
+            return res.status(404).json({ error: 'Lavador não encontrado nesta empresa.' });
         }
-      }
-    });
 
-    res.json({
-      message: `Lavador ${updatedLavador.ativo ? 'ativado' : 'desativado'} com sucesso`,
-      lavador: updatedLavador
-    });
-  } catch (error) {
-    console.error('Erro ao alterar status do lavador:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
+        // O token contém o ID do lavador e da empresa para validação na rota pública
+        const token = jwt.sign(
+            { lavadorId: lavador.id, empresaId: lavador.empresaId },
+            process.env.JWT_SECRET || 'seu_segredo_jwt_aqui',
+            { expiresIn: '24h' } // O link público expira em 24 horas
+        );
+
+        res.json({ token });
+
+    } catch (error) {
+        console.error('Erro ao gerar token público para lavador:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
 };

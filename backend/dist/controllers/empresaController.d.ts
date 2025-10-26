@@ -1,16 +1,16 @@
 import { Request, Response } from 'express';
 interface EmpresaRequest extends Request {
+    usuarioId?: string;
     empresaId?: string;
-    empresa?: any;
 }
 /**
  * Criar nova empresa
  */
 export declare const createEmpresa: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 /**
- * Listar todas as empresas (apenas para admin)
+ * Listar todas as empresas do usuário logado
  */
-export declare const getEmpresas: (req: Request, res: Response) => Promise<void>;
+export declare const getEmpresas: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 /**
  * Buscar empresa por ID
  */
@@ -22,10 +22,6 @@ export declare const updateEmpresa: (req: EmpresaRequest, res: Response) => Prom
 /**
  * Desativar/ativar empresa
  */
-export declare const toggleEmpresaStatus: (req: EmpresaRequest, res: Response) => Promise<void>;
-/**
- * Autenticar empresa (login)
- */
-export declare const authenticateEmpresa: (req: Request, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+export declare const toggleEmpresaStatus: (req: EmpresaRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export {};
 //# sourceMappingURL=empresaController.d.ts.map

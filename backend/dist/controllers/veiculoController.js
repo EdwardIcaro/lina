@@ -1,14 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVeiculo = exports.updateVeiculo = exports.getVeiculoById = exports.getVeiculos = exports.createVeiculo = void 0;
-const prisma_1 = require("../generated/prisma");
-const prisma = new prisma_1.PrismaClient();
+exports.deleteVeiculo = exports.updateVeiculo = exports.getVeiculoByPlaca = exports.getVeiculoById = exports.getVeiculos = exports.createVeiculo = void 0;
+const client_1 = require("@prisma/client");
+const prisma = new client_1.PrismaClient();
 /**
  * Criar novo veículo
  */
 const createVeiculo = async (req, res) => {
     try {
-        const { clienteId, placa, modelo, cor, ano, categoriaId } = req.body;
+        const { clienteId, placa, modelo, cor, ano } = req.body;
         if (!clienteId || !placa) {
             return res.status(400).json({
                 error: 'Cliente ID e placa são obrigatórios'
@@ -39,8 +39,7 @@ const createVeiculo = async (req, res) => {
                 placa: placa.trim().toUpperCase(),
                 modelo,
                 cor,
-                ano,
-                categoriaId
+                ano
             },
             include: {
                 cliente: {
@@ -180,12 +179,43 @@ const getVeiculoById = async (req, res) => {
 };
 exports.getVeiculoById = getVeiculoById;
 /**
+ * Buscar veículo por Placa
+ */
+const getVeiculoByPlaca = async (req, res) => {
+    try {
+        const { placa } = req.params;
+        if (!placa) {
+            return res.status(400).json({ error: 'Placa é obrigatória' });
+        }
+        const veiculo = await prisma.veiculo.findFirst({
+            where: {
+                placa: placa.toUpperCase(),
+                cliente: {
+                    empresaId: req.empresaId
+                }
+            },
+            include: {
+                cliente: true
+            }
+        });
+        if (!veiculo) {
+            return res.status(404).json({ error: 'Veículo não encontrado' });
+        }
+        res.json(veiculo);
+    }
+    catch (error) {
+        console.error('Erro ao buscar veículo por placa:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+};
+exports.getVeiculoByPlaca = getVeiculoByPlaca;
+/**
  * Atualizar veículo
  */
 const updateVeiculo = async (req, res) => {
     try {
         const { id } = req.params;
-        const { clienteId, placa, modelo, cor, ano, categoriaId } = req.body;
+        const { clienteId, placa, modelo, cor, ano } = req.body;
         // Verificar se veículo existe e pertence à empresa
         const existingVeiculo = await prisma.veiculo.findFirst({
             where: {
@@ -228,8 +258,7 @@ const updateVeiculo = async (req, res) => {
                 ...(placa && { placa: placa.trim().toUpperCase() }),
                 ...(modelo !== undefined && { modelo }),
                 ...(cor !== undefined && { cor }),
-                ...(ano !== undefined && { ano }),
-                ...(categoriaId && { categoriaId })
+                ...(ano !== undefined && { ano })
             },
             include: {
                 cliente: {

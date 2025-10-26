@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '../generated/prisma';
+import prisma from '../db';
 
-const prisma = new PrismaClient();
 
 interface EmpresaRequest extends Request {
   empresaId?: string;
@@ -26,7 +25,7 @@ export const createCliente = async (req: EmpresaRequest, res: Response) => {
       where: {
         empresaId: req.empresaId,
         OR: [
-          ...(email ? [{ email }] : []),
+          ...(email ? [{ email: email }] : []),
           ...(telefone ? [{ telefone }] : [])
         ]
       }
@@ -42,8 +41,8 @@ export const createCliente = async (req: EmpresaRequest, res: Response) => {
       data: {
         empresaId: req.empresaId!,
         nome,
-        telefone,
-        email
+        telefone: telefone || null,
+        email: email || null, // Garante que email vazio seja salvo como null
       },
       include: {
         veiculos: true,
@@ -71,7 +70,7 @@ export const createCliente = async (req: EmpresaRequest, res: Response) => {
  */
 export const getClientes = async (req: EmpresaRequest, res: Response) => {
   try {
-    const { page = 1, limit = 10, search } = req.query;
+    const { page = 1, limit = 100, search } = req.query; // Define valores padrão
     const skip = (Number(page) - 1) * Number(limit);
 
     // Construir filtro de busca
@@ -83,14 +82,7 @@ export const getClientes = async (req: EmpresaRequest, res: Response) => {
       where.OR = [
         { nome: { contains: search as string } },
         { telefone: { contains: search as string } },
-        { email: { contains: search as string } },
-        { 
-          veiculos: { 
-            some: { 
-              placa: { contains: search as string } 
-            } 
-          } 
-        }
+        { email: { contains: search as string } }
       ];
     }
 
@@ -180,8 +172,19 @@ export const getClienteById = async (req: EmpresaRequest, res: Response) => {
       },
       include: {
         veiculos: {
-          orderBy: {
-            createdAt: 'desc'
+          orderBy: { createdAt: 'desc' },
+          include: { // Inclui a última ordem finalizada para inferir o tipo/subtipo
+            ordens: {
+              where: { status: 'FINALIZADO' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              include: {
+                items: {
+                  take: 1, // Pega apenas o primeiro item para simplificar
+                  include: { servico: { include: { tiposVeiculo: true } } }
+                }
+              }
+            }
           }
         },
         ordens: {
@@ -252,7 +255,7 @@ export const updateCliente = async (req: EmpresaRequest, res: Response) => {
             { id: { not: id } },
             {
               OR: [
-                ...(email ? [{ email }] : []),
+                ...(email ? [{ email: email }] : []),
                 ...(telefone ? [{ telefone }] : [])
               ]
             }
@@ -271,8 +274,8 @@ export const updateCliente = async (req: EmpresaRequest, res: Response) => {
       where: { id },
       data: {
         ...(nome && { nome }),
-        ...(telefone !== undefined && { telefone }),
-        ...(email !== undefined && { email }),
+        ...(telefone !== undefined && { telefone: telefone || null }),
+        ...(email !== undefined && { email: email || null }), // Garante que email vazio seja salvo como null
         ...(ativo !== undefined && { ativo })
       },
       include: {

@@ -1,11 +1,14 @@
 import { Request, Response } from 'express';
-import { PrismaClient, MetodoPagamento, StatusPagamento } from '../generated/prisma';
-
-const prisma = new PrismaClient();
+import prisma from '../db';
+import { Prisma, Pagamento, MetodoPagamento, StatusPagamento } from '@prisma/client';
 
 interface EmpresaRequest extends Request {
   empresaId?: string;
-  empresa?: any;
+}
+
+interface PagamentoInput {
+  method: MetodoPagamento;
+  amount: number;
 }
 
 /**
@@ -16,8 +19,8 @@ export const createPagamento = async (req: EmpresaRequest, res: Response) => {
     const { ordemId, metodo, valor, observacoes } = req.body;
 
     if (!ordemId || !metodo || !valor) {
-      return res.status(400).json({ 
-        error: 'Ordem ID, método e valor são obrigatórios' 
+      return res.status(400).json({
+        error: 'Ordem ID, método e valor são obrigatórios'
       });
     }
 
@@ -34,10 +37,10 @@ export const createPagamento = async (req: EmpresaRequest, res: Response) => {
     }
 
     // Validar método de pagamento
-    const metodosValidos = ['DINHEIRO', 'PIX', 'CARTAO', 'PENDENTE'];
+    const metodosValidos = Object.values(MetodoPagamento);
     if (!metodosValidos.includes(metodo)) {
-      return res.status(400).json({ 
-        error: `Método inválido. Use: ${metodosValidos.join(', ')}` 
+      return res.status(400).json({
+        error: `Método inválido. Use: ${metodosValidos.join(', ')}`
       });
     }
 
@@ -52,7 +55,7 @@ export const createPagamento = async (req: EmpresaRequest, res: Response) => {
         ordemId,
         empresaId: req.empresaId!,
         metodo: metodo as MetodoPagamento,
-        valor,
+        valor: valor,
         observacoes,
         status: metodo === 'PENDENTE' ? StatusPagamento.PENDENTE : StatusPagamento.PAGO,
         pagoEm: metodo === 'PENDENTE' ? null : new Date()
@@ -147,10 +150,10 @@ export const updatePagamentoStatus = async (req: EmpresaRequest, res: Response) 
     }
 
     // Validar status
-    const statusValidos = ['PENDENTE', 'PAGO', 'CANCELADO'];
+    const statusValidos = Object.values(StatusPagamento);
     if (!statusValidos.includes(status)) {
-      return res.status(400).json({ 
-        error: `Status inválido. Use: ${statusValidos.join(', ')}` 
+      return res.status(400).json({
+        error: `Status inválido. Use: ${statusValidos.join(', ')}`
       });
     }
 
@@ -241,7 +244,7 @@ export const getPaymentStats = async (req: EmpresaRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query;
 
-    let dateFilter = {};
+    let dateFilter: Prisma.DateTimeFilter | {} = {};
     if (startDate && endDate) {
       dateFilter = {
         createdAt: {
@@ -332,7 +335,7 @@ async function verificarStatusPagamentoOrdem(ordemId: string) {
 
   if (!ordem) return;
 
-  const totalPago = ordem.pagamentos.reduce((sum, pgto) => sum + pgto.valor, 0);
+  const totalPago = ordem.pagamentos.reduce((sum: number, pgto: Pagamento) => sum + pgto.valor, 0);
   const estaTotalmentePaga = totalPago >= ordem.valorTotal;
 
   await prisma.ordemServico.update({
@@ -342,3 +345,49 @@ async function verificarStatusPagamentoOrdem(ordemId: string) {
     }
   });
 }
+
+export const quitarPendencia = async (req: EmpresaRequest, res: Response) => {
+  const empresaId = req.empresaId!;
+  const { ordemId, pagamentos } = req.body as { ordemId: string; pagamentos: PagamentoInput[] };
+
+  if (!ordemId || !pagamentos || !Array.isArray(pagamentos) || pagamentos.length === 0) {
+    return res.status(400).json({ error: 'Dados insuficientes para quitar a pendência.' });
+  }
+
+  try {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // 1. Encontrar e deletar o pagamento pendente antigo
+      const pagamentoPendente = await tx.pagamento.findFirst({
+        where: {
+          ordemId,
+          empresaId,
+          metodo: 'PENDENTE',
+        },
+      });
+
+      if (pagamentoPendente) {
+        await tx.pagamento.delete({
+          where: { id: pagamentoPendente.id },
+        });
+      }
+
+      // 2. Criar os novos registros de pagamento
+      for (const p of pagamentos) {
+        await tx.pagamento.create({
+          data: {
+            ordemId,
+            empresaId,
+            metodo: p.method,
+            valor: p.amount,
+            status: 'PAGO',
+            pagoEm: new Date(),
+          },
+        });
+      }
+    });
+    res.status(200).json({ message: 'Pendência quitada com sucesso.' });
+  } catch (error) {
+    console.error('Erro ao quitar pendência:', error);
+    res.status(500).json({ error: 'Erro ao quitar pendência.' });
+  }
+};
