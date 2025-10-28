@@ -1,13 +1,13 @@
 import { Request, Response } from 'express';
 import prisma from '../db';
-import { Prisma, Pagamento, MetodoPagamento, StatusPagamento } from '@prisma/client';
+import { Prisma, Pagamento } from '@prisma/client';
 
 interface EmpresaRequest extends Request {
   empresaId?: string;
 }
 
 interface PagamentoInput {
-  method: MetodoPagamento;
+  method: string;
   amount: number;
 }
 
@@ -36,14 +36,6 @@ export const createPagamento = async (req: EmpresaRequest, res: Response) => {
       return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
     }
 
-    // Validar método de pagamento
-    const metodosValidos = Object.values(MetodoPagamento);
-    if (!metodosValidos.includes(metodo)) {
-      return res.status(400).json({
-        error: `Método inválido. Use: ${metodosValidos.join(', ')}`
-      });
-    }
-
     // Validar valor
     if (valor <= 0) {
       return res.status(400).json({ error: 'Valor deve ser maior que zero' });
@@ -54,10 +46,10 @@ export const createPagamento = async (req: EmpresaRequest, res: Response) => {
       data: {
         ordemId,
         empresaId: req.empresaId!,
-        metodo: metodo as MetodoPagamento,
+        metodo: metodo as any,
         valor: valor,
         observacoes,
-        status: metodo === 'PENDENTE' ? StatusPagamento.PENDENTE : StatusPagamento.PAGO,
+        status: metodo === 'PENDENTE' ? 'PENDENTE' as any : 'PAGO' as any,
         pagoEm: metodo === 'PENDENTE' ? null : new Date()
       },
       include: {
@@ -149,18 +141,10 @@ export const updatePagamentoStatus = async (req: EmpresaRequest, res: Response) 
       return res.status(404).json({ error: 'Pagamento não encontrado' });
     }
 
-    // Validar status
-    const statusValidos = Object.values(StatusPagamento);
-    if (!statusValidos.includes(status)) {
-      return res.status(400).json({
-        error: `Status inválido. Use: ${statusValidos.join(', ')}`
-      });
-    }
-
     const updatedPagamento = await prisma.pagamento.update({
       where: { id },
       data: {
-        status: status as StatusPagamento,
+        status: status as any,
         pagoEm: status === 'PAGO' ? new Date() : null
       },
       include: {
@@ -219,7 +203,7 @@ export const deletePagamento = async (req: EmpresaRequest, res: Response) => {
     }
 
     // Não permitir deletar pagamentos de ordens não finalizadas (exceto PENDENTE)
-    if (pagamento.ordem.status !== 'FINALIZADO' && pagamento.metodo !== 'PENDENTE') {
+    if (pagamento.ordem.status !== 'FINALIZADO' && pagamento.metodo !== 'PENDENTE' as any) {
       return res.status(400).json({ error: 'Não é possível excluir pagamentos de ordens que não estão finalizadas.' });
     }
 
@@ -359,9 +343,9 @@ export const quitarPendencia = async (req: EmpresaRequest, res: Response) => {
       // 1. Encontrar e deletar o pagamento pendente antigo
       const pagamentoPendente = await tx.pagamento.findFirst({
         where: {
-          ordemId,
+          ordemId, 
           empresaId,
-          metodo: 'PENDENTE',
+          metodo: 'PENDENTE' as any,
         },
       });
 
@@ -377,7 +361,7 @@ export const quitarPendencia = async (req: EmpresaRequest, res: Response) => {
           data: {
             ordemId,
             empresaId,
-            metodo: p.method,
+            metodo: p.method as any,
             valor: p.amount,
             status: 'PAGO',
             pagoEm: new Date(),

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Prisma, OrdemServico, OrdemStatus, OrdemItemType, MetodoPagamento } from '@prisma/client';
+import { Prisma, OrdemServico, PrismaClient } from '@prisma/client';
 import prisma from '../db';
 import { createNotification } from '../services/notificationService';
 
@@ -9,7 +9,7 @@ interface EmpresaRequest extends Request {
 }
 
 interface OrdemItemInput {
-  tipo: OrdemItemType;
+  tipo: 'SERVICO' | 'ADICIONAL';
   itemId: string;
   quantidade: number;
 }
@@ -99,7 +99,7 @@ export const createOrdem = async (req: EmpresaRequest, res: Response) => {
           where: {
             veiculoId: finalVeiculoId,
             empresaId,
-            status: { in: [OrdemStatus.PENDENTE, OrdemStatus.EM_ANDAMENTO] },
+                        status: { in: ['PENDENTE', 'EM_ANDAMENTO'] as any },
           },
         });
 
@@ -116,7 +116,7 @@ export const createOrdem = async (req: EmpresaRequest, res: Response) => {
           let precoUnit = 0;
           let itemData;
 
-          if (item.tipo === 'SERVICO') {
+                if (item.tipo === 'SERVICO') {
             const servico = await tx.servico.findUnique({ where: { id: item.itemId } });
             if (servico) {
               precoUnit = servico.preco;
@@ -127,13 +127,13 @@ export const createOrdem = async (req: EmpresaRequest, res: Response) => {
             const subtotal = precoUnit * item.quantidade;
             calculatedValorTotal += subtotal;
             itemData = {
-              tipo: 'SERVICO' as OrdemItemType,
+                        tipo: 'SERVICO',
               quantidade: item.quantidade,
               precoUnit,
               subtotal,
               servicoId: item.itemId
             };
-          } else if (item.tipo === 'ADICIONAL') {
+                } else if (item.tipo === 'ADICIONAL') {
             const adicional = await tx.adicional.findUnique({ where: { id: item.itemId } });
             if (adicional) {
               precoUnit = adicional.preco;
@@ -144,7 +144,7 @@ export const createOrdem = async (req: EmpresaRequest, res: Response) => {
             const subtotal = precoUnit * item.quantidade;
             calculatedValorTotal += subtotal;
             itemData = {
-              tipo: 'ADICIONAL' as OrdemItemType,
+                        tipo: 'ADICIONAL',
               quantidade: item.quantidade,
               precoUnit,
               subtotal,
@@ -192,7 +192,7 @@ export const createOrdem = async (req: EmpresaRequest, res: Response) => {
           lavadorId,
           valorTotal: calculatedValorTotal,
           comissao: comissaoCalculada, // A comissão é calculada, mas só é "devida" ao finalizar
-          status: lavadorId ? OrdemStatus.EM_ANDAMENTO : OrdemStatus.PENDENTE,
+                    status: lavadorId ? 'EM_ANDAMENTO' : 'PENDENTE' as any,
           observacoes: observacoes,
           items: { create: ordemItemsData.filter(Boolean) as any },
         },
@@ -275,13 +275,13 @@ export const getOrdens = async (req: EmpresaRequest, res: Response) => {
     if (status) {
       const statusString = status as string;
       if (statusString === 'ACTIVE') {
-        where.status = { in: [OrdemStatus.PENDENTE, OrdemStatus.EM_ANDAMENTO] };
+                where.status = { in: ['PENDENTE', 'EM_ANDAMENTO'] as any };
       } else if (statusString.includes(',')) {
-        where.status = { in: statusString.split(',') as OrdemStatus[] };
+                where.status = { in: statusString.split(',') as any };
       } else {
-        where.status = statusString as OrdemStatus;
-      }
-    }
+                where.status = statusString as any;
+            }
+        }
 
     if (clienteId) {
       where.clienteId = clienteId as string;
@@ -308,8 +308,8 @@ export const getOrdens = async (req: EmpresaRequest, res: Response) => {
 
     if (metodoPagamento) {
       where.pagamentos = {
-        some: {
-          metodo: metodoPagamento as MetodoPagamento
+                some: { 
+          metodo: metodoPagamento as any
         }
       };
     }
@@ -494,18 +494,18 @@ export const updateOrdem = async (req: EmpresaRequest, res: Response) => {
           }
 
           let itemData;
-          let precoUnitario = 0;
+                    let precoUnitario = 0;
 
-          if (tipo === OrdemItemType.SERVICO) {
+                    if (tipo === 'SERVICO') {
             const servico = await tx.servico.findUnique({ where: { id: itemId, empresaId: req.empresaId! } });
             if (!servico) throw new Error(`Serviço com ID ${itemId} não encontrado`);
             precoUnitario = servico.preco;
-            itemData = { tipo: OrdemItemType.SERVICO, servico: { connect: { id: itemId } }, quantidade, precoUnit: precoUnitario, subtotal: precoUnitario * quantidade };
-          } else if (tipo === OrdemItemType.ADICIONAL) {
+                        itemData = { tipo: 'SERVICO' as any, servico: { connect: { id: itemId } }, quantidade, precoUnit: precoUnitario, subtotal: precoUnitario * quantidade };
+                    } else if (tipo === 'ADICIONAL') {
             const adicional = await tx.adicional.findUnique({ where: { id: itemId, empresaId: req.empresaId! } });
             if (!adicional) throw new Error(`Adicional com ID ${itemId} não encontrado`);
             precoUnitario = adicional.preco;
-            itemData = { tipo: OrdemItemType.ADICIONAL, adicional: { connect: { id: itemId } }, quantidade, precoUnit: precoUnitario, subtotal: precoUnitario * quantidade };
+            itemData = { tipo: 'ADICIONAL' as any, adicional: { connect: { id: itemId } }, quantidade, precoUnit: precoUnitario, subtotal: precoUnitario * quantidade };
           } else {
             throw new Error('Tipo de item inválido. Use SERVICO ou ADICIONAL');
           }
@@ -984,11 +984,11 @@ export const processarFinalizacoesAutomaticas = async () => {
                 data: {
                   status: 'FINALIZADO',
                   dataFim: new Date(),
-                  pagamentos: {
+                                pagamentos: {
                     create: {
                       empresaId: empresa.id,
-                      valor: ordem.valorTotal, // TODO: Check if this should be the remaining amount
-                      metodo: MetodoPagamento.PENDENTE,
+                                        valor: ordem.valorTotal,
+                                        metodo: 'PENDENTE' as any,
                       status: 'PENDENTE',
                     },
                   },

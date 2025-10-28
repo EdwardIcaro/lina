@@ -1,19 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../db';
-import {
-    Prisma,
-    CaixaRegistro,
-    FechamentoCaixa,
-    Adiantamento,
-    Fornecedor,
-    Lavador,
-    OrdemServico,
-    Veiculo,
-    Pagamento,
-    StatusFechamento,
-    TipoCaixa,
-    FormaPagamento
-} from '@prisma/client';
+import { Prisma, CaixaRegistro, FechamentoCaixa, Adiantamento, Fornecedor, Lavador, OrdemServico, Veiculo, Pagamento } from '@prisma/client';
 
 interface EmpresaRequest extends Request {
     empresaId?: string;
@@ -48,7 +35,7 @@ type HistoricoItem = {
     tipo: string;
     data: Date | null;
     valor: number;
-    formaPagamento: FormaPagamento | null;
+    formaPagamento: string | null;
     descricao: string;
     ordemId?: string;
     lavador?: Lavador | null;
@@ -114,16 +101,16 @@ export const createFechamento = async (req: EmpresaRequest, res: Response) => {
                     dinheiro: dinheiro,
                     cartao: cartao,
                     diferenca,
-                    status: Math.abs(diferenca) < 0.01 ? StatusFechamento.CONFERIDO : StatusFechamento.DIVERGENTE,
+                    status: Math.abs(diferenca) < 0.01 ? 'CONFERIDO' as any : 'DIVERGENTE' as any,
                     observacao,
                 },
             }),
             prisma.caixaRegistro.create({
                 data: {
                     empresaId,
-                    tipo: TipoCaixa.FECHAMENTO,
+                    tipo: 'FECHAMENTO' as any,
                     valor: 0,
-                    formaPagamento: FormaPagamento.NA,
+                    formaPagamento: 'NA' as any,
                     descricao: `Fechamento do dia. Diferença: ${diferenca.toFixed(2)}`,
                 }
             })
@@ -177,9 +164,9 @@ export const createSaida = async (req: EmpresaRequest, res: Response) => {
             return await tx.caixaRegistro.create({
                 data: {
                     empresaId,
-                    tipo: TipoCaixa.SAIDA,
+                    tipo: 'SAIDA',
                     valor: valor,
-                    formaPagamento: formaPagamento as FormaPagamento,
+                    formaPagamento: formaPagamento as any,
                     descricao: finalDescricao,
                     fornecedorId,
                     lavadorId,
@@ -217,9 +204,9 @@ export const createSangria = async (req: EmpresaRequest, res: Response) => {
         const sangria = await prisma.caixaRegistro.create({
             data: {
                 empresaId,
-                tipo: TipoCaixa.SANGRIA,
+                tipo: 'SANGRIA',
                 valor: valor,
-                formaPagamento: FormaPagamento.DINHEIRO,
+                formaPagamento: 'DINHEIRO',
                 descricao: observacao || 'Retirada de caixa (Sangria)',
             }
         });
@@ -237,7 +224,7 @@ export const getHistorico = async (req: EmpresaRequest, res: Response) => {
     const where: Prisma.CaixaRegistroWhereInput = { empresaId };
 
     if (tipo) {
-        where.tipo = tipo as TipoCaixa;
+        where.tipo = tipo as any;
     }
 
     const empresa = await prisma.empresa.findUnique({ where: { id: empresaId } });
@@ -280,7 +267,25 @@ export const getHistorico = async (req: EmpresaRequest, res: Response) => {
             new Date(b.data!).getTime() - new Date(a.data!).getTime()
         );
 
-        res.json(todosRegistros);
+        // Calcular totais com base nos registros filtrados
+        const totalEntradas = registrosPagamento.reduce((acc, p) => acc + p.valor, 0);
+        const totalSaidas = outrosRegistros
+            .filter(r => r.tipo === 'SAIDA' || r.tipo === 'SANGRIA')
+            .reduce((acc, r) => acc + r.valor, 0);
+
+        const totais = {
+            totalEntradas,
+            totalSaidas,
+            detalheSaidas: {
+                saidas: outrosRegistros.filter(r => r.tipo === 'SAIDA').reduce((acc, r) => acc + r.valor, 0),
+                sangrias: outrosRegistros.filter(r => r.tipo === 'SANGRIA').reduce((acc, r) => acc + r.valor, 0),
+            }
+        };
+
+        res.json({
+            registros: todosRegistros,
+            totais: totais
+        });
     } catch (error) {
         console.error('Erro ao buscar histórico de caixa:', error);
         res.status(500).json({ error: 'Erro ao buscar histórico de caixa.' });
@@ -319,7 +324,7 @@ export const getFechamentoById = async (req: EmpresaRequest, res: Response) => {
 
     try {
         const registroFechamento = await prisma.caixaRegistro.findFirst({
-            where: { id, empresaId, tipo: 'FECHAMENTO' },
+            where: { id, empresaId, tipo: 'FECHAMENTO' as any },
         });
 
         if (!registroFechamento) {
@@ -331,7 +336,7 @@ export const getFechamentoById = async (req: EmpresaRequest, res: Response) => {
 
         const fechamento = await prisma.fechamentoCaixa.findFirst({
             where: { empresaId, data: { gte: getWorkdayRange(registroFechamento.data, horarioAbertura).start, lte: getWorkdayRange(registroFechamento.data, horarioAbertura).end } },
-        });
+        }); 
 
         if (!fechamento) return res.status(404).json({ error: 'Detalhes do fechamento não encontrados para esta data.' });
 
@@ -510,9 +515,9 @@ export const fecharComissao = async (req: EmpresaRequest, res: Response) => {
                 await tx.caixaRegistro.create({
                     data: {
                         empresaId,
-                        tipo: TipoCaixa.SAIDA,
+                        tipo: 'SAIDA',
                         valor: valorPago,
-                        formaPagamento: formaPagamento as FormaPagamento,
+                        formaPagamento: formaPagamento as any,
                         descricao: `Pagamento de comissão para ${lavador?.nome || 'Funcionário'}`,
                         lavadorId,
                     },
@@ -584,13 +589,13 @@ export const updateCaixaRegistro = async (req: EmpresaRequest, res: Response) =>
             fornecedorId = fornecedor.id;
         }
 
-        const finalDescricao = tipo === 'Adiantamento' ? 'Adiantamento para funcionário' : `[${tipo}] ${descricao}`;
+        const finalDescricao = tipo === 'Adiantamento' ? `Adiantamento para funcionário` : `[${tipo}] ${descricao}`;
 
         const registroAtualizado = await prisma.caixaRegistro.update({
             where: { id, empresaId },
             data: {
                 valor: valor,
-                formaPagamento: formaPagamento as FormaPagamento,
+                formaPagamento: formaPagamento as any,
                 descricao: finalDescricao,
                 fornecedorId,
                 lavadorId: tipo === 'Adiantamento' ? lavadorId : null,

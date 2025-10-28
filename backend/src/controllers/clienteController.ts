@@ -199,6 +199,12 @@ export const getClienteById = async (req: EmpresaRequest, res: Response) => {
               select: {
                 nome: true
               }
+            },
+            items: {
+              include: {
+                servico: { select: { nome: true } },
+                adicional: { select: { nome: true } }
+              }
             }
           },
           orderBy: {

@@ -2,8 +2,8 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"  
-  output   = "../node_modules/.prisma/client"
+  provider = "prisma-client-js"
+  output   = "node_modules/.prisma/client"
 }
 
 datasource db {
@@ -28,35 +28,35 @@ model Usuario {
 
 // Modelo principal de Empresas (Multi-tenancy)
 model Empresa {
-  id               String            @id @default(cuid())
-  nome             String            @unique
-  cnpj             String?           @unique
-  ativo            Boolean           @default(true)
-  config           Json?
-  horarioAbertura  String?
-  horarioFechamento String?
-  finalizacaoAutomatica Boolean?       @default(false)
-  exigirLavadorParaFinalizar Boolean? @default(false)
-  paginaInicialPadrao String? @default("index.html")
-  notificationPreferences Json?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  usuarioId        String // Chave estrangeira para o usuário dono
+  id                           String                 @id @default(cuid())
+  nome                         String                 @unique
+  cnpj                         String?                @unique
+  ativo                        Boolean                @default(true)
+  config                       Json?
+  horarioAbertura              String?
+  horarioFechamento            String?
+  finalizacaoAutomatica        Boolean?               @default(false)
+  exigirLavadorParaFinalizar   Boolean?               @default(false)
+  paginaInicialPadrao          String?                @default("index.html")
+  notificationPreferences      Json?
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
+  usuarioId                    String // Chave estrangeira para o usuário dono
   // Relacionamentos
-  clientes         Cliente[]
-  lavadores        Lavador[]
-  servicos         Servico[]
-  adicionais       Adicional[]
-  adiantamentos    Adiantamento[]
-  ordens           OrdemServico[]
-  pagamentos       Pagamento[]
-  tipoVeiculos     TipoVeiculo[]
-  fornecedores     Fornecedor[]
-  fechamentosCaixa FechamentoCaixa[]
-  caixaRegistros   CaixaRegistro[]
-  fechamentosComissao FechamentoComissao[]
-  usuario          Usuario           @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  notificacoes     Notificacao[]
+  clientes                     Cliente[]
+  lavadores                    Lavador[]
+  servicos                     Servico[]
+  adicionais                   Adicional[]
+  adiantamentos                Adiantamento[]
+  ordens                       OrdemServico[]
+  pagamentos                   Pagamento[]
+  tipoVeiculos                 TipoVeiculo[]
+  fornecedores                 Fornecedor[]
+  fechamentosCaixa             FechamentoCaixa[]
+  caixaRegistros               CaixaRegistro[]
+  fechamentosComissao          FechamentoComissao[]
+  usuario                      Usuario                @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  notificacoes                 Notificacao[]
 
   @@map("empresas")
 }
@@ -115,22 +115,38 @@ model Veiculo {
 
 // Modelo de Lavadores
 model Lavador {
-  id             String          @id @default(cuid())
-  empresaId      String
-  nome           String
-  comissao       Float // Porcentagem de comissão (ex: 15.5 para 15.5%)
-  ativo          Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id                  String               @id @default(cuid())
+  empresaId           String
+  nome                String
+  comissao            Float // Porcentagem de comissão (ex: 15.5 para 15.5%)
+  ativo               Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
   // Relacionamentos
-  empresa        Empresa         @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  ordens         OrdemServico[]
-  caixaRegistros CaixaRegistro[]
-  adiantamentos  Adiantamento[]
+  empresa             Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ordens              OrdemServico[]
+  tokens              LavadorToken[]
+  caixaRegistros      CaixaRegistro[]
+  adiantamentos       Adiantamento[]
   fechamentosComissao FechamentoComissao[]
 
   @@unique([nome, empresaId])
   @@map("lavadores")
+}
+
+// Modelo de Tokens de Acesso para Lavadores (NOVO)
+model LavadorToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  ativo     Boolean  @default(true)
+  lavadorId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamento
+  lavador Lavador @relation(fields: [lavadorId], references: [id], onDelete: Cascade)
+
+  @@map("lavador_tokens")
 }
 
 // Modelo de Fornecedores (NOVO PARA CAIXA)
@@ -183,9 +199,9 @@ model CaixaRegistro {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  empresa    Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
-  lavador    Lavador?   @relation(fields: [lavadorId], references: [id], onDelete: SetNull)
+  empresa      Empresa       @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  fornecedor   Fornecedor?   @relation(fields: [fornecedorId], references: [id])
+  lavador      Lavador?      @relation(fields: [lavadorId], references: [id], onDelete: SetNull)
 
   // Relacionamento com Adiantamento
   adiantamento Adiantamento?
@@ -250,33 +266,33 @@ model Adicional {
 
 // Modelo Principal de Ordens de Serviço
 model OrdemServico {
-  id          String      @id @default(cuid())
-  numeroOrdem Int
-  empresaId   String
-  clienteId   String
-  veiculoId   String
-  lavadorId   String?
-  status      OrdemStatus @default(PENDENTE)
-  valorTotal  Float
-  observacoes String?
-  dataInicio  DateTime?
-  dataFim     DateTime?
-  pago        Boolean     @default(false)
-  comissao    Float       @default(0)
-  comissaoPaga Boolean     @default(false)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id                   String                @id @default(cuid())
+  numeroOrdem          Int
+  empresaId            String
+  clienteId            String
+  veiculoId            String
+  lavadorId            String?
+  status               OrdemStatus           @default(PENDENTE)
+  valorTotal           Float
+  observacoes          String?
+  dataInicio           DateTime?
+  dataFim              DateTime?
+  pago                 Boolean               @default(false)
+  comissao             Float                 @default(0)
+  comissaoPaga         Boolean               @default(false)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 
   // Relacionamentos
-  empresa    Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  cliente    Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  veiculo    Veiculo            @relation(fields: [veiculoId], references: [id], onDelete: Cascade) // Manter Cascade para consistência
-  lavador    Lavador?           @relation(fields: [lavadorId], references: [id], onDelete: SetNull)
-  items      OrdemServicoItem[]
-  pagamentos Pagamento[]
-  
+  empresa              Empresa               @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  cliente              Cliente               @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  veiculo              Veiculo               @relation(fields: [veiculoId], references: [id], onDelete: Cascade) // Manter Cascade para consistência
+  lavador              Lavador?              @relation(fields: [lavadorId], references: [id], onDelete: SetNull)
+  items                OrdemServicoItem[]
+  pagamentos           Pagamento[]
+
   fechamentoComissaoId String?
-  fechamentoComissao   FechamentoComissao? @relation(fields: [fechamentoComissaoId], references: [id])
+  fechamentoComissao   FechamentoComissao?   @relation(fields: [fechamentoComissaoId], references: [id])
 
   @@unique([empresaId, numeroOrdem])
   @@map("ordens_servico")
@@ -322,7 +338,46 @@ model Pagamento {
   @@map("pagamentos")
 }
 
-// Enums
+model Adiantamento {
+  id              String                @id @default(cuid())
+  valor           Float
+  data            DateTime              @default(now())
+  status          String                @default("PENDENTE") // PENDENTE, QUITADO
+
+  lavadorId       String
+  lavador         Lavador               @relation(fields: [lavadorId], references: [id])
+
+  empresaId       String
+  empresa         Empresa               @relation(fields: [empresaId], references: [id])
+
+  // Relacionamento com o registro de caixa que gerou a saída
+  caixaRegistroId String?               @unique
+  caixaRegistro   CaixaRegistro?        @relation(fields: [caixaRegistroId], references: [id])
+
+  fechamentoComissaoId String?
+  fechamentoComissao   FechamentoComissao?   @relation(fields: [fechamentoComissaoId], references: [id])
+
+  @@map("adiantamentos")
+}
+
+model FechamentoComissao {
+  id                    String         @id @default(cuid())
+  data                  DateTime       @default(now())
+  valorPago             Float
+
+  empresaId             String
+  empresa               Empresa        @relation(fields: [empresaId], references: [id])
+
+  lavadorId             String
+  lavador               Lavador        @relation(fields: [lavadorId], references: [id])
+
+  // Relacionamentos com os itens que foram pagos/quitados neste fechamento
+  ordensPagas           OrdemServico[]
+  adiantamentosQuitados Adiantamento[]
+
+  @@map("fechamentos_comissao")
+}
+
 enum OrdemStatus {
   PENDENTE
   EM_ANDAMENTO
@@ -337,73 +392,39 @@ enum OrdemItemType {
 
 enum MetodoPagamento {
   DINHEIRO
+  CARTAO_CREDITO
+  CARTAO_DEBITO
   PIX
-  CARTAO
+  OUTRO
   PENDENTE
 }
 
+enum StatusPagamento {
+  PENDENTE
+  PAGO
+  FALHOU
+  CANCELADO
+}
+
+enum StatusFechamento {
+  PENDENTE
+  CONCLUIDO
+  DIVERGENCIA
+  CONFERIDO // Adicionado para compatibilidade
+  DIVERGENTE // Adicionado para compatibilidade
+}
+
 enum TipoCaixa {
-  FECHAMENTO
+  ENTRADA
   SAIDA
   SANGRIA
+  VALE // Mantido
+  FECHAMENTO
 }
 
 enum FormaPagamento {
   DINHEIRO
   PIX
   CARTAO
-  VALE
-  NA
-}
-
-enum StatusPagamento {
-  PENDENTE
-  PAGO
-  CANCELADO
-}
-
-enum StatusFechamento {
-  PENDENTE
-  CONFERIDO
-  DIVERGENTE
-}
-
-model Adiantamento {
-  id        String   @id @default(cuid())
-  valor     Float
-  data      DateTime @default(now())
-  status    String   @default("PENDENTE") // PENDENTE, QUITADO
-
-  lavadorId String
-  lavador   Lavador  @relation(fields: [lavadorId], references: [id])
-
-  empresaId String
-  empresa   Empresa  @relation(fields: [empresaId], references: [id])
-
-  // Relacionamento com o registro de caixa que gerou a saída
-  caixaRegistroId String?       @unique
-  caixaRegistro   CaixaRegistro? @relation(fields: [caixaRegistroId], references: [id])
-  
-  fechamentoComissaoId String?
-  fechamentoComissao   FechamentoComissao? @relation(fields: [fechamentoComissaoId], references: [id])
-
-  @@map("adiantamentos")
-}
-
-model FechamentoComissao {
-  id        String   @id @default(cuid())
-  data      DateTime @default(now())
-  valorPago Float
-  
-  empresaId String
-  empresa   Empresa @relation(fields: [empresaId], references: [id])
-
-  lavadorId String
-  lavador   Lavador @relation(fields: [lavadorId], references: [id])
-
-  // Relacionamentos com os itens que foram pagos/quitados neste fechamento
-  ordensPagas     OrdemServico[]
-  adiantamentosQuitados Adiantamento[]
-
-  @@map("fechamentos_comissao")
+  NA // Adicionado
 }

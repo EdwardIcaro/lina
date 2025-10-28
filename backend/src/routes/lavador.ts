@@ -15,6 +15,6 @@ router.get('/simple', getLavadoresSimple); // <-- Rota que estava faltando
 router.post('/', createLavador);
 router.put('/:id', updateLavador);
 router.delete('/:id', deleteLavador);
-router.get('/:id/token', gerarTokenPublico); // <-- Rota que estava faltando
+router.post('/:id/token', gerarTokenPublico); // MUDADO PARA POST
 
 export default router;
